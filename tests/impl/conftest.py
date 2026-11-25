@@ -11,11 +11,14 @@ from pathlib import Path
 
 import pytest
 
+from quota_dashboard.sources import codex
+
 
 @pytest.fixture(autouse=True)
 def isolated_state_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """默认把持久化状态文件指向临时目录，用例不读写真实用户目录。"""
     monkeypatch.setenv("QUOTA_STATE_FILE", str(tmp_path / "quota-state.json"))
+    monkeypatch.setattr(codex, "AUTH_FILE", tmp_path / "codex-auth.json")
 
 
 def free_port() -> int:

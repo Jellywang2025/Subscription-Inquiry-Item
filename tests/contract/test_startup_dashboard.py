@@ -45,6 +45,7 @@ class Launch:
 def browser_environment(log: Path) -> dict[str, str]:
     browser = Path(__file__).with_name("record_browser_open.py")
     env = os.environ.copy()
+    env["USERPROFILE"] = str(log.parent / "dashboard-profile")
     env["PATH"] = os.pathsep.join((str(Path(sys.executable).parent), env.get("PATH", "")))
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["BROWSER"] = f'"{sys.executable}" "{browser}" %s'

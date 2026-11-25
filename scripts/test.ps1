@@ -237,9 +237,6 @@ try {
     Invoke-CheckedStep -Name 'governance' -FilePath $bash -Arguments @('scripts/check-governance.sh')
     Invoke-CheckedStep -Name 'pyright' -FilePath $python -Arguments @('-m', 'pyright')
     Invoke-CheckedStep -Name 'node-check' -FilePath $node.Source -Arguments @('--check', 'quota_dashboard/static/app.js')
-    $testProfile = Join-Path $runDir 'profile'
-    [void][System.IO.Directory]::CreateDirectory($testProfile)
-    $env:USERPROFILE = $testProfile
     foreach ($credential in @('QUOTA_CODEX_ACCESS_TOKEN', 'DEEPSEEK_API_KEY', 'MIMO_API_KEY')) {
         [Environment]::SetEnvironmentVariable($credential, $null, 'Process')
     }
