@@ -1,0 +1,21 @@
+[project]
+name = "quota-dashboard"
+version = "0.1.0"
+description = "个人订阅额度看板：Windows 本机服务 + 浏览器看板"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pyright>=1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.pyright]
+include = ["quota_dashboard", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
