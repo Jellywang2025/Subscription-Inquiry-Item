@@ -84,15 +84,16 @@ def _run_git(work: Path, *args: str) -> str:
 
 @pytest.fixture()
 def work_repo(tmp_path: Path) -> Path:
+    # A synthetic ref is enough for the wrapper's HEAD pin and avoids creating
+    # read-only git object files that the test entry's cleanup cannot delete.
     work = tmp_path / "work"
     work.mkdir()
     _run_git(work, "init", "-q")
-    _run_git(work, "config", "user.email", "contract@example.invalid")
-    _run_git(work, "config", "user.name", "Contract Test")
-    _run_git(work, "config", "commit.gpgsign", "false")
-    (work / "README.md").write_text("fixture\n", encoding="utf-8")
-    _run_git(work, "add", "-A")
-    _run_git(work, "commit", "-q", "-m", "fixture")
+    ref = work / ".git" / "refs" / "heads" / "main"
+    ref.parent.mkdir(parents=True, exist_ok=True)
+    ref.write_text("a" * 40 + "\n", encoding="utf-8")
+    (work / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (work / ".git" / "objects").mkdir(exist_ok=True)
     return work
 
 
