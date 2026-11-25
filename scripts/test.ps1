@@ -18,23 +18,74 @@ $runDir = $null
 $logDir = $null
 $createdTempRoot = $false
 
+function Get-NormalizedPath {
+    param([string]$Path)
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetPathRoot($full)
+    if ($full.Length -gt $root.Length) {
+        $full = $full.TrimEnd([char[]]@('\', '/'))
+    }
+    return $full
+}
+
+function Test-PathWithin {
+    param([string]$Path, [string]$Root)
+    $fullPath = Get-NormalizedPath $Path
+    $fullRoot = Get-NormalizedPath $Root
+    if ($fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+    $prefix = $fullRoot + [System.IO.Path]::DirectorySeparatorChar
+    return $fullPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 function Resolve-TempRoot {
     param([string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) {
-        return [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+        return Get-NormalizedPath ([System.IO.Path]::GetTempPath())
     }
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
+    $candidate = if ([System.IO.Path]::IsPathRooted($Path)) {
+        $Path
     }
-    return [System.IO.Path]::GetFullPath((Join-Path $repoRoot $Path))
+    else {
+        Join-Path -Path $repoRoot -ChildPath $Path
+    }
+    $fullPath = Get-NormalizedPath $candidate
+    $repoRootFull = Get-NormalizedPath $repoRoot
+    if (Test-PathWithin -Path $fullPath -Root $repoRootFull) {
+        $unifiedTemp = Get-NormalizedPath (Join-Path -Path $repoRoot -ChildPath '.tmp')
+        if (-not (Test-PathWithin -Path $fullPath -Root $unifiedTemp)) {
+            throw "TempRoot must be the repository .tmp directory or outside the repository: $fullPath"
+        }
+    }
+    return $fullPath
+}
+
+function Assert-NoReparsePoints {
+    param([string]$Path)
+    $fullPath = Get-NormalizedPath $Path
+    $root = [System.IO.Path]::GetPathRoot($fullPath)
+    $current = $root
+    $segments = $fullPath.Substring($root.Length).Split(
+        [char[]]@('\', '/'),
+        [System.StringSplitOptions]::RemoveEmptyEntries
+    )
+    foreach ($segment in $segments) {
+        $current = Join-Path -Path $current -ChildPath $segment
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing to clean through a reparse point: $current"
+        }
+    }
 }
 
 function Resolve-Python {
     $venvPython = Join-Path $repoRoot '.venv\Scripts\python.exe'
     if (Test-Path -LiteralPath $venvPython) {
         try {
+            $global:LASTEXITCODE = $null
             & $venvPython -c "import pytest, pyright" 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 0) {
+            if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -eq 0) {
                 return $venvPython
             }
         }
@@ -52,7 +103,11 @@ function Resolve-Python {
             Select-Object -First 1
         if ($candidate) {
             $env:PYTHONPATH = Join-Path $repoRoot '.venv\Lib\site-packages'
-            return $candidate
+            $global:LASTEXITCODE = $null
+            & $candidate -c "import pytest, pyright" 2>$null | Out-Null
+            if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -eq 0) {
+                return $candidate
+            }
         }
     }
     return $null
@@ -65,13 +120,13 @@ function Resolve-GitBash {
         }
         throw "GIT_BASH does not exist: $env:GIT_BASH"
     }
-    $defaultBash = 'D:\Git\bin\bash.exe'
-    if (Test-Path -LiteralPath $defaultBash) {
-        return $defaultBash
-    }
-    $bashCommand = Get-Command bash -ErrorAction SilentlyContinue
-    if ($bashCommand) {
-        return $bashCommand.Source
+    $git = Get-Command git.exe -ErrorAction SilentlyContinue
+    if ($git) {
+        $gitRoot = Split-Path -Parent (Split-Path -Parent $git.Source)
+        $gitBash = Join-Path $gitRoot 'bin\bash.exe'
+        if (Test-Path -LiteralPath $gitBash -PathType Leaf) {
+            return $gitBash
+        }
     }
     throw 'Git Bash not found. Set GIT_BASH to bash.exe.'
 }
@@ -82,15 +137,23 @@ function Remove-OwnedRunDirectory {
         [string]$Root,
         [string]$Marker
     )
-    $fullPath = [System.IO.Path]::GetFullPath($Path)
-    $fullRoot = [System.IO.Path]::GetFullPath($Root)
-    if (-not $fullRoot.EndsWith('\')) {
-        $fullRoot += '\'
-    }
-    if (-not $fullPath.StartsWith($fullRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    $fullPath = Get-NormalizedPath $Path
+    $fullRoot = Get-NormalizedPath $Root
+    $outsideRoot = -not (Test-PathWithin -Path $fullPath -Root $fullRoot)
+    if ($outsideRoot -or $fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to clean a path outside the temporary root: $fullPath"
     }
-    $owner = Join-Path $fullPath '.owner'
+    $runItem = Get-Item -LiteralPath $fullPath -Force -ErrorAction Stop
+    if (-not $runItem.PSIsContainer) {
+        throw "Refusing to clean a non-directory: $fullPath"
+    }
+    # 物理路径中的任一层都不得是重解析点，避免删除被重定向到临时根之外。
+    Assert-NoReparsePoints -Path $fullPath
+    $physicalPath = Get-NormalizedPath $runItem.FullName
+    if (-not $physicalPath.Equals($fullPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to clean a directory whose physical path differs: $physicalPath"
+    }
+    $owner = Join-Path -Path $fullPath -ChildPath '.owner'
     if (-not [System.IO.File]::Exists($owner)) {
         throw "Refusing to clean a directory without an ownership marker: $fullPath"
     }
@@ -116,8 +179,9 @@ function Invoke-CheckedStep {
     )
     Write-Host ("==> {0}" -f $Name)
     $log = Join-Path $logDir ("{0}.log" -f $Name)
+    $global:LASTEXITCODE = $null
     & $FilePath @Arguments 2>&1 | Tee-Object -FilePath $log
-    $code = $LASTEXITCODE
+    $code = if ($null -eq $LASTEXITCODE) { 1 } else { $LASTEXITCODE }
     if ($code -ne 0) {
         Add-Content -LiteralPath (Join-Path $logDir 'summary.log') -Value ("FAIL {0} exit={1}" -f $Name, $code)
         Write-Failure -Step $Name -Code $code
@@ -173,6 +237,13 @@ try {
     Invoke-CheckedStep -Name 'governance' -FilePath $bash -Arguments @('scripts/check-governance.sh')
     Invoke-CheckedStep -Name 'pyright' -FilePath $python -Arguments @('-m', 'pyright')
     Invoke-CheckedStep -Name 'node-check' -FilePath $node.Source -Arguments @('--check', 'quota_dashboard/static/app.js')
+    $testProfile = Join-Path $runDir 'profile'
+    [void][System.IO.Directory]::CreateDirectory($testProfile)
+    $env:USERPROFILE = $testProfile
+    foreach ($credential in @('QUOTA_CODEX_ACCESS_TOKEN', 'DEEPSEEK_API_KEY', 'MIMO_API_KEY')) {
+        [Environment]::SetEnvironmentVariable($credential, $null, 'Process')
+    }
+
     Invoke-CheckedStep -Name 'pytest' -FilePath $python -Arguments @(
         '-m', 'pytest',
         ('--basetemp=' + (Join-Path $runDir 'pytest')),

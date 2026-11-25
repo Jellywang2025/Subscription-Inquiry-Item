@@ -50,4 +50,4 @@ jobs:
         run: uv sync --locked --python 3.12
       - name: 运行统一 Windows 测试入口
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
+        run: ./scripts/test.ps1

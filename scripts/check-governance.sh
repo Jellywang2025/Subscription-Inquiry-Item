@@ -23,6 +23,7 @@ for entry in ./*; do
             ;;
     esac
 done
+shopt -u dotglob
 
 if ((${#root_temp[@]})); then
     printf '仓库根目录存在临时项：\n' >&2
@@ -44,6 +45,7 @@ required_entries=(
     docs/agents/domain.md
     docs/agents/dsh-codex-cli.md
     docs/agents/triage-labels.md
+    docs/agents/open-code-review.md
     .agents/skills/README.md
     .agents/skills/implement/SKILL.md
     scripts/check-governance.sh
@@ -97,13 +99,13 @@ for doc in "${link_docs[@]}"; do
 done
 
 for archive_spec in spec/archived/*.md; do
-    if ! grep -q '状态 `archived`' "$archive_spec"; then
+    if ! grep -qE '^[[:space:]]*-[[:space:]]+状态[[:space:]]+`archived`' "$archive_spec"; then
         printf '归档规格缺少“状态 archived”：%s\n' "$archive_spec" >&2
         exit 1
     fi
 done
 for active_spec in spec/implement/*.md; do
-    if grep -q '状态 `archived`' "$active_spec"; then
+    if grep -qE '^[[:space:]]*-[[:space:]]+状态[[:space:]]+`archived`' "$active_spec"; then
         printf '实施中规格不应标记 archived：%s\n' "$active_spec" >&2
         exit 1
     fi

@@ -16,7 +16,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -TempRoot .tmp
 ```
 
-入口在系统临时目录（或 `-TempRoot`）下建立唯一运行子目录，把 `QUOTA_STATE_FILE` 和 Codex、DeepSeek、MiMo 的服务地址隔离到本机不可达端点，依次运行治理检查、`pyright`、`node --check` 和 `pytest`。失败时保留运行目录并打印日志路径与失败码；成功后只用 .NET 清理本次创建的目录。治理检查通过 `GIT_BASH` 调用 Git Bash，本机默认 `D:\Git\bin\bash.exe`，CI 使用 `C:\Program Files\Git\bin\bash.exe`。
+入口在系统临时目录（或 `-TempRoot`）下建立唯一运行子目录，把 `QUOTA_STATE_FILE` 和 Codex、DeepSeek、MiMo 的服务地址隔离到本机不可达端点，依次运行治理检查、`pyright`、`node --check` 和 `pytest`。失败时保留运行目录并打印日志路径与失败码；成功后只用 .NET 清理本次创建的目录。治理检查通过 `GIT_BASH` 调用 Git Bash，本机默认 `Git for Windows 自带的 bash.exe`，CI 使用 `C:\Program Files\Git\bin\bash.exe`。
 
 `scripts/check-governance.sh` 保留既有 Git 差异空白检查，并检查关键文档本地链接、规格归档状态和仓库根目录临时项。[GitHub Actions](.github/workflows/ci.yml)的治理作业调用同一治理脚本，Windows 作业调用同一测试入口，触发条件为提交进入 `main` 或提交面向 `main` 的 PR。
 

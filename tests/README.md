@@ -17,6 +17,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -TempRoot .tmp
 ```
 
-入口在系统临时目录（或 `-TempRoot`）下创建唯一运行子目录，把 `QUOTA_STATE_FILE` 和 Codex、DeepSeek、MiMo 的服务地址隔离到本机不可达端点，按治理检查 → `pyright` → `node --check` → `pytest` 执行。失败时保留运行目录，打印日志路径和退出码；成功后只用 .NET 清理本次创建的目录。Windows Git Bash 从 `GIT_BASH` 解析，本机默认 `D:\Git\bin\bash.exe`，CI 使用 `C:\Program Files\Git\bin\bash.exe`。
+入口在系统临时目录（或 `-TempRoot`）下创建唯一运行子目录，把 `QUOTA_STATE_FILE` 和 Codex、DeepSeek、MiMo 的服务地址隔离到本机不可达端点，按治理检查 → `pyright` → `node --check` → `pytest` 执行。失败时保留运行目录，打印日志路径和退出码；成功后只用 .NET 清理本次创建的目录。Windows Git Bash 从 `GIT_BASH` 解析，本机默认 `Git for Windows 自带的 bash.exe`，CI 使用 `C:\Program Files\Git\bin\bash.exe`。
 
 `scripts/check-governance.sh` 的根目录临时项检查会拒绝 `.tmp-gov-red-*` 等根目录临时文件；`.tmp/` 是受限环境统一使用的忽略目录。
