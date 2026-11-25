@@ -12,9 +12,9 @@ Spec 写定验收条件和关键用例。DSH 调用独立的 [`codex-tester`](..
 本地、测试员与 CI 从仓库根目录执行同一个 Windows PowerShell 入口：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
+pwsh -NoProfile -File scripts/test.ps1
 # 受限环境系统临时目录不可写时，使用仓库内统一忽略目录
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -TempRoot .tmp
+pwsh -NoProfile -File scripts/test.ps1 -TempRoot .tmp
 ```
 
 入口在系统临时目录（或 `-TempRoot`）下创建唯一运行子目录，把 `QUOTA_STATE_FILE` 和 Codex、DeepSeek、MiMo 的服务地址隔离到本机不可达端点，按治理检查 → `pyright` → `node --check` → `pytest` 执行。失败时保留运行目录，打印日志路径和退出码；成功后只用 .NET 清理本次创建的目录。Windows Git Bash 从 `GIT_BASH` 解析，本机默认 `Git for Windows 自带的 bash.exe`，CI 使用 `C:\Program Files\Git\bin\bash.exe`。

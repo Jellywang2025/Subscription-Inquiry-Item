@@ -35,7 +35,7 @@ function Test-PathWithin {
     if ($fullPath.Equals($fullRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
         return $true
     }
-    $prefix = $fullRoot + [System.IO.Path]::DirectorySeparatorChar
+    $prefix = $fullRoot.TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
     return $fullPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
@@ -126,6 +126,11 @@ function Resolve-GitBash {
         $gitBash = Join-Path $gitRoot 'bin\bash.exe'
         if (Test-Path -LiteralPath $gitBash -PathType Leaf) {
             return $gitBash
+        }
+    }
+    foreach ($bash in Get-Command bash.exe -All -ErrorAction SilentlyContinue) {
+        if ($bash.Source -match '[\\/]Git[\\/](?:usr[\\/])?bin[\\/]bash\.exe$') {
+            return $bash.Source
         }
     }
     throw 'Git Bash not found. Set GIT_BASH to bash.exe.'

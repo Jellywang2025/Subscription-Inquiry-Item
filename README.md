@@ -11,9 +11,9 @@ Codex 会话和老板确认需求、验收条件与关键用例，将 Spec 写�
 本地、测试员与 CI 共用 Windows PowerShell 测试入口（仓库根目录）：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
+pwsh -NoProfile -File scripts/test.ps1
 # 受限环境系统临时目录不可写时，改用仓库内统一忽略目录
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1 -TempRoot .tmp
+pwsh -NoProfile -File scripts/test.ps1 -TempRoot .tmp
 ```
 
 入口在系统临时目录（或 `-TempRoot`）下建立唯一运行子目录，把 `QUOTA_STATE_FILE` 和 Codex、DeepSeek、MiMo 的服务地址隔离到本机不可达端点，依次运行治理检查、`pyright`、`node --check` 和 `pytest`。失败时保留运行目录并打印日志路径与失败码；成功后只用 .NET 清理本次创建的目录。治理检查通过 `GIT_BASH` 调用 Git Bash，本机默认 `Git for Windows 自带的 bash.exe`，CI 使用 `C:\Program Files\Git\bin\bash.exe`。
@@ -29,7 +29,7 @@ Windows 本机双击 `start-dashboard.bat` 打开看板；服务已在运行时�
 ```powershell
 uv venv --python 3.12 .venv
 uv sync --locked  # 按 uv.lock 安装 dev 依赖（pytest、pyright）
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test.ps1
+pwsh -NoProfile -File scripts/test.ps1
 ```
 
 入口优先使用 `.venv\Scripts\python.exe`；受限沙箱（如 `codex-tester`）不允许执行该解释器时，改用它从 uv 下载的 Python 3.12 裸解释器（按实际安装版本解析，不绑死补丁号），并通过 `PYTHONPATH` 复用 `.venv\Lib\site-packages` 中已装的依赖。
