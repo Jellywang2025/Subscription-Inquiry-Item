@@ -6,6 +6,10 @@
 
 规格已归档，9 张本地工单已交付。参见[已确认规格](archived/personal-quota-dashboard.md)、[工单及验收索引](work-items/README.md)。
 
+## 当前协作试点
+
+[协作试点规范](implement/collaboration-pilot.md)覆盖共享 PR 的测试入口与 CLI 留档。进度与结果见 [试点 PR](https://github.com/Jellywang2025/Subscription-Inquiry-Item/pull/3)。
+
 ## 目录
 
 | 目录 | 用途 | 进入条件 |
