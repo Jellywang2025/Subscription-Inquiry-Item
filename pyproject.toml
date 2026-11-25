@@ -16,6 +16,6 @@ testpaths = ["tests"]
 pythonpath = ["."]
 
 [tool.pyright]
-include = ["quota_dashboard", "tests"]
+include = ["quota_dashboard", "scripts", "tests"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"

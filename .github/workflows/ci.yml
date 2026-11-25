@@ -34,6 +34,7 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 15
     env:
+      GIT_BASH: 'C:\Program Files\Git\bin\bash.exe'
       QUOTA_CODEX_BASE_URL: http://127.0.0.1:1
       QUOTA_DEEPSEEK_BASE_URL: http://127.0.0.1:1
       QUOTA_MIMO_BASE_URL: http://127.0.0.1:1
@@ -47,12 +48,6 @@ jobs:
           python-version: '3.12'
       - name: 安装锁定的开发依赖
         run: uv sync --locked --python 3.12
-      - name: 静态检查
-        run: |
-          uv run --locked pyright
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node --check quota_dashboard/static/app.js
-      - name: 运行 Windows 全量测试
-        run: |
-          $env:QUOTA_STATE_FILE = Join-Path $env:RUNNER_TEMP 'quota-ci-state.json'
-          uv run --locked pytest --basetemp=.tmp-ci-tests -p no:cacheprovider
+      - name: 运行统一 Windows 测试入口
+        shell: pwsh
+        run: ./scripts/test.ps1
