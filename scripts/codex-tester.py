@@ -486,7 +486,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _write_bytes(run_dir / "stderr.log", stderr_payload)
             receipt_path = _write_receipt(run_dir, receipt)
         except OSError as exc:
-            print(f"无法写入回执 {run_dir / 'receipt.json'}: {exc}", file=sys.stderr)
+            print(f"无法写入运行产物 {exc.filename or run_dir}: {exc}", file=sys.stderr)
             return 3
         print(f"receipt: {receipt_path}")
         print(f"status: {receipt['status']}")
@@ -555,19 +555,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         return finish(f"codex 启动失败: {exc}")
 
     timed_out = False
+    interrupted = False
     try:
         stdout_payload, stderr_payload = process.communicate(
             request.encode("utf-8"), timeout=timeout_seconds
         )
-    except subprocess.TimeoutExpired as exc:
-        timed_out = True
+    except (subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
+        timed_out = isinstance(exc, subprocess.TimeoutExpired)
+        interrupted = not timed_out
         _kill_process_tree(process)
         try:
             captured_out, captured_err = process.communicate(timeout=30)
         except subprocess.TimeoutExpired:
             captured_out, captured_err = b"", b""
-        stdout_payload = captured_out or (exc.output or b"")
-        stderr_payload = captured_err or (exc.stderr or b"")
+        stdout_payload = captured_out
+        stderr_payload = captured_err
+        if isinstance(exc, subprocess.TimeoutExpired):
+            stdout_payload = stdout_payload or exc.output or b""
+            stderr_payload = stderr_payload or exc.stderr or b""
 
     receipt["process_exit_code"] = process.returncode
     receipt["timed_out"] = timed_out
@@ -579,7 +584,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             last_message = last_message_path.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
             last_message = None
-    status = None if timed_out else _parse_business_status(last_message, phase)
+    status = None if timed_out or interrupted else _parse_business_status(last_message, phase)
     if status is not None:
         receipt["status"] = status
         receipt["status_source"] = "last_message"
@@ -588,7 +593,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         receipt["status_source"] = "none"
 
     failure_reason: str | None = None
-    if timed_out:
+    if interrupted:
+        failure_reason = "codex 调用被中断"
+    elif timed_out:
         failure_reason = f"codex 超时（{timeout_seconds:g} 秒）"
     elif last_message is None:
         failure_reason = "Codex 未生成 output-last-message 回执"
