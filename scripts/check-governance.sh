@@ -49,6 +49,7 @@ required_entries=(
     .agents/skills/README.md
     .agents/skills/implement/SKILL.md
     scripts/check-governance.sh
+    scripts/codex-tester.py
     scripts/test.ps1
 )
 

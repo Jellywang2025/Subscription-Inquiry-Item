@@ -11,19 +11,53 @@ DSH 主控在一片开始时调用 `codex-tester` 的 `red` 阶段，实现并�
 - `verify` 在独立工作树只读验收。运行器确需写缓存或临时数据时，写入隔离工作树或专用临时目录，结束后核对跟踪文件差异。修复交给 DSH，验收断言的更正交给测试员单独处理。每次复验注明实际待验提交。
 - 主控核对回执及变更范围，固化红灯交接提交，在工单或 PR 引用请求摘要和验收证据。CLI 退出码说明调用是否完成，业务结论以实测回执为准。缺少独立结果时记录阻塞。验收证据引用已核验的提交，更新代码或验收用例后以新的待验提交重新验收。
 
-## 复用已有的 `codex-tester`
+## 仓库内测试员入口
 
-归档时记录封装运行 ID、CLI session ID、阶段、实际验收提交、CLI 退出码、耗时和可见 token 用量，并链接实测回执。当前封装的 CLI 文本日志可从 stderr 核对 session ID 和总 token。缺少用量明细时记为「未记录」。仓库内保存上述元数据和实测结论，原始请求和输出保存在本机。
-
-优先使用 DSH 已配置的 `codex-tester`。将本仓库的路径、版本、SHA 和允许写入范围作为任务参数传入。首次调用前确认本机可用的 Codex CLI、认证、工作树和测试命令。若本机封装引用了旧项目的位置，接入时核对其实际读取的是当前任务的仓库与 Spec。
-
-现有 PowerShell 封装支持 `-Agent tester`、`-Phase red|verify`、`-WorkDir`、`-Task` 和可选的 `-ArchiveFile` 时，可由 DSH 按如下方式传参。变量由主控根据当前切片传入。
+本仓库用 `scripts/codex-tester.py`（Python 3.12，只依赖标准库）执行 `red` 和 `verify`。脚本保留测试官角色约束与阶段状态词，不修改安装的全局封装。调用前先确认本机 `codex` 可执行文件、认证、工作树和测试命令可用。
 
 ```powershell
-& $testerScript -Agent tester -Phase red -WorkDir $redWorktree -Task $redTask
-& $testerScript -Agent tester -Phase verify -WorkDir $verifyWorktree -Task $verifyTask
+python scripts/codex-tester.py `
+  --ticket 2 `
+  --phase red `
+  --work-dir <实现前工作树> `
+  --expected-sha <实现前基线SHA> `
+  --task-file <本机任务文件>
+
+python scripts/codex-tester.py `
+  --ticket 2 `
+  --phase verify `
+  --work-dir <待验SHA的干净工作树> `
+  --expected-sha <待验SHA> `
+  --task-file <本机任务文件>
 ```
 
-其他封装可使用相同输入和回执约定。直接接入 Codex CLI 时，可用 `codex exec --cd <工作树> --sandbox <模式> --ephemeral --output-last-message <回执文件> -` 从标准输入传角色约束与任务。通常 `red` 用 `workspace-write`，`verify` 用 `read-only`。两条命令由主控在各自阶段执行。
+| 参数 | 说明 |
+| --- | --- |
+| `--ticket` | 工单编号或标识，写入回执。 |
+| `--phase` | `red` 或 `verify`。 |
+| `--work-dir` | 已检出到目标提交的工作树。 |
+| `--expected-sha` | 启动前要求匹配的 HEAD；实际 HEAD 不一致时不启动 Codex，回执记为 `BLOCKED`。 |
+| `--task-file` | UTF-8 任务参数文件，包含 Spec 路径及版本、AC、允许写入范围和验证命令。 |
+| `--receipt-root` | 仓库外回执根目录。默认 `%LOCALAPPDATA%\codex-tester\receipts`，也可用环境变量或本机路径覆盖。 |
+| `--codex` | 可选的实际 `codex` 可执行文件完整路径；省略时依次查 `CODEX_CLI_PATH`、PATH 的 `codex.exe` 和桌面版 `bin`。不要传全局 `.cmd`/`.ps1` 封装。 |
+| `--model` | 默认 `gpt-6.2-sol`。 |
+| `--sandbox` | 省略时 `red` 用 `workspace-write`，`verify` 用 `read-only`。 |
+| `--effort` | 推理力度，默认 `high`。 |
+| `--timeout-seconds` | Codex 运行超时，默认 900 秒。超时会终止进程树并保留已捕获输出。 |
+
+脚本先固定工作树实际 HEAD，再把便携角色约束和任务从标准输入传给 `codex exec`，同时传 `--json` 与 `--output-last-message`。每次调用只在仓库外创建一个带唯一 ID 的运行目录：
+
+```text
+<receipt-root>/<UTC时间>-<ticket>-<phase>-<run-id>/
+  request.md          角色约束与任务原文
+  stdout.jsonl        Codex JSONL 原始标准输出
+  stderr.log          Codex 原始标准错误
+  last-message.md     --output-last-message 回执原文
+  receipt.json        JSON 元数据与业务结论
+```
+
+`receipt.json` 关联工单、阶段、实际 SHA、运行 ID、CLI 会话 ID、进程退出码、业务状态、耗时和日志路径。会话 ID 取 `thread.started` 的 `thread_id`；token 取 `turn.completed` 的可见 `usage`，会话或用量缺失时写 `null`。业务状态只取 `last-message.md` 第一条非空行的显式状态词：`red` 接受 `RED_READY`、`ALREADY_PASSES`、`BLOCKED`，`verify` 接受 `PASS`、`FAIL`、`BLOCKED`。正文里的 `PASS`/`FAIL` 不参与判定；没有有效首行时状态为 `BLOCKED`。进程退出码单独保留，不能替代业务状态。
+
+成功、计划内 `BLOCKED`、Codex 非零退出、启动失败和超时都会写回执与已有日志。脚本自身退出 `0` 表示回执已保存，`2` 表示参数或仓库外目录校验失败，`3` 表示运行目录或回执无法写入。公开工单和 PR 只引用脱敏摘要、公开 SHA 与证据摘要，原始日志留在本机运行目录。
 
 项目约定见[协作约定](../../spec/governance/working-agreement.md)和[测试约定](../../tests/README.md)。

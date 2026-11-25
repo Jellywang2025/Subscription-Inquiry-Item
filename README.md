@@ -20,6 +20,15 @@ pwsh -NoProfile -File scripts/test.ps1 -TempRoot .tmp
 
 `scripts/check-governance.sh` 保留既有 Git 差异空白检查，并检查关键文档本地链接、规格归档状态和仓库根目录临时项。[GitHub Actions](.github/workflows/ci.yml)的治理作业调用同一治理脚本，Windows 作业调用同一测试入口，触发条件为提交进入 `main` 或提交面向 `main` 的 PR。
 
+测试员的 `red`/`verify` 回执统一由仓库内 `scripts/codex-tester.py` 生成：
+
+```powershell
+python scripts/codex-tester.py --ticket 2 --phase red `
+  --work-dir <工作树> --expected-sha <基线SHA> --task-file <任务文件>
+```
+
+脚本启动前核对 HEAD，调用实际 `codex exec --json --output-last-message`，并把原始日志和 JSON 回执写到仓库外带唯一 ID 的运行目录。成功、计划内 `BLOCKED`、非零退出、启动失败和超时都留档；业务状态只取回执首行，进程退出码单独记录。参数和回执字段见[测试智能体调用约定](docs/agents/dsh-codex-cli.md)。
+
 ## 个人订阅额度看板
 
 Windows 本机双击 `start-dashboard.bat` 打开看板；服务已在运行时再次双击，直接打开同一看板。命令行等价入口为 `python -m quota_dashboard [--port N]`（默认端口 8765）。
