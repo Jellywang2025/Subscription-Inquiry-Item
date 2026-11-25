@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -56,10 +57,6 @@ verify 为 PASS、FAIL 或 BLOCKED。
 - 遇到规格与测试冲突时写明具体条目、差异和建议。本角色不承担产品实现或合入。"""
 
 
-class ReceiptError(RuntimeError):
-    """A run directory or receipt could not be created."""
-
-
 def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -93,12 +90,21 @@ def _has_malformed_git_config(env: dict[str, str]) -> bool:
         return True
     if count < 0:
         return True
-    return any(f"GIT_CONFIG_KEY_{index}" not in env for index in range(count))
+    return any(
+        f"GIT_CONFIG_KEY_{index}" not in env or f"GIT_CONFIG_VALUE_{index}" not in env
+        for index in range(count)
+    )
 
 
-def _git_environment(sanitize: bool) -> dict[str, str]:
+def _git_environment() -> dict[str, str]:
     env = os.environ.copy()
-    if sanitize or _has_malformed_git_config(env):
+    for key in (
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+        "GIT_SHALLOW_FILE", "GIT_REPLACE_REF_BASE",
+    ):
+        env.pop(key, None)
+    if _has_malformed_git_config(env):
         for key in list(env):
             if key.startswith("GIT_CONFIG_KEY_") or key.startswith("GIT_CONFIG_VALUE_"):
                 env.pop(key, None)
@@ -110,31 +116,14 @@ def _run_git(work_dir: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         ["git", "-C", str(work_dir), *args],
         capture_output=True,
-        env=_git_environment(sanitize=False),
-        timeout=30,
-    )
-
-
-def _run_git_with_retry(work_dir: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
-    try:
-        result = _run_git(work_dir, *args)
-    except OSError:
-        result = None
-    if result is not None and result.returncode == 0:
-        return result
-    # A malformed GIT_CONFIG_COUNT in the parent environment breaks every git
-    # command.  Retry this single command with that injection removed.
-    return subprocess.run(
-        ["git", "-C", str(work_dir), *args],
-        capture_output=True,
-        env=_git_environment(sanitize=True),
+        env=_git_environment(),
         timeout=30,
     )
 
 
 def _read_head(work_dir: Path) -> tuple[str | None, str | None]:
     try:
-        result = _run_git_with_retry(work_dir, "rev-parse", "HEAD")
+        result = _run_git(work_dir, "rev-parse", "HEAD")
     except (OSError, subprocess.TimeoutExpired) as exc:
         return None, f"无法读取 git HEAD: {exc}"
     if result.returncode != 0:
@@ -146,7 +135,7 @@ def _read_head(work_dir: Path) -> tuple[str | None, str | None]:
 
 def _repo_root(work_dir: Path) -> Path | None:
     try:
-        result = _run_git_with_retry(work_dir, "rev-parse", "--show-toplevel")
+        result = _run_git(work_dir, "rev-parse", "--show-toplevel")
     except (OSError, subprocess.TimeoutExpired):
         return None
     if result.returncode != 0:
@@ -207,7 +196,7 @@ def _codex_version(prefix: Sequence[str]) -> str | None:
             [*prefix, "--version"],
             capture_output=True,
             timeout=15,
-            env=_git_environment(sanitize=False),
+            env=_git_environment(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -295,6 +284,14 @@ def _kill_process_tree(process: subprocess.Popen[bytes]) -> None:
             )
         except (OSError, subprocess.TimeoutExpired):
             pass
+    else:
+        kill_process_group = getattr(os, "killpg", None)
+        if kill_process_group is not None:
+            try:
+                kill_process_group(process.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+                return
+            except OSError:
+                pass
     try:
         process.kill()
     except OSError:
@@ -484,9 +481,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         receipt["duration_seconds"] = round(time.monotonic() - started_monotonic, 3)
         receipt["logs"]["request"] = str(request_path) if request_path.is_file() else None
         receipt["logs"]["last_message"] = str(last_message_path) if last_message_path.is_file() else None
-        _write_bytes(run_dir / "stdout.jsonl", stdout_payload)
-        _write_bytes(run_dir / "stderr.log", stderr_payload)
         try:
+            _write_bytes(run_dir / "stdout.jsonl", stdout_payload)
+            _write_bytes(run_dir / "stderr.log", stderr_payload)
             receipt_path = _write_receipt(run_dir, receipt)
         except OSError as exc:
             print(f"无法写入回执 {run_dir / 'receipt.json'}: {exc}", file=sys.stderr)
@@ -509,7 +506,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         task = Path(args.task_file).expanduser().read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         return finish(f"无法读取任务文件 {args.task_file}: {exc}")
     if not task.strip():
         return finish(f"任务文件为空: {args.task_file}")
@@ -548,10 +545,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         process = subprocess.Popen(
             command,
             cwd=str(work_dir),
+            start_new_session=os.name != "nt",
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=_git_environment(sanitize=False),
+            env=_git_environment(),
         )
     except OSError as exc:
         return finish(f"codex 启动失败: {exc}")
@@ -579,7 +577,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if last_message_path.is_file():
         try:
             last_message = last_message_path.read_text(encoding="utf-8")
-        except OSError:
+        except (OSError, UnicodeError):
             last_message = None
     status = None if timed_out else _parse_business_status(last_message, phase)
     if status is not None:

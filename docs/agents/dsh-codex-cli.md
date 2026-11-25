@@ -56,7 +56,7 @@ python scripts/codex-tester.py `
   receipt.json        JSON 元数据与业务结论
 ```
 
-`receipt.json` 关联工单、阶段、实际 SHA、运行 ID、CLI 会话 ID、进程退出码、业务状态、耗时和日志路径。会话 ID 取 `thread.started` 的 `thread_id`；token 取 `turn.completed` 的可见 `usage`，会话或用量缺失时写 `null`。业务状态只取 `last-message.md` 第一条非空行的显式状态词：`red` 接受 `RED_READY`、`ALREADY_PASSES`、`BLOCKED`，`verify` 接受 `PASS`、`FAIL`、`BLOCKED`。正文里的 `PASS`/`FAIL` 不参与判定；没有有效首行时状态为 `BLOCKED`。进程退出码单独保留，不能替代业务状态。
+`receipt.json` 关联工单、阶段、实际 SHA、运行 ID、CLI 会话 ID、进程退出码、业务状态、耗时和日志路径。会话 ID 取 `thread.started` 的 `thread_id`；token 取 `turn.completed` 的可见 `usage`，会话或用量缺失时写 `null`。业务状态只取 `last-message.md` 第一条非空行的显式状态词：`red` 接受 `RED_READY`、`ALREADY_PASSES`、`BLOCKED`，`verify` 接受 `PASS`、`FAIL`、`BLOCKED`。正文里的 `PASS`/`FAIL` 不参与判定；没有有效首行时状态为 `BLOCKED`。推进门禁时同时核对实际 SHA、CLI 进程退出码为零、阶段结论及可复现证据。
 
 成功、计划内 `BLOCKED`、Codex 非零退出、启动失败和超时都会写回执与已有日志。脚本自身退出 `0` 表示回执已保存，`2` 表示参数或仓库外目录校验失败，`3` 表示运行目录或回执无法写入。公开工单和 PR 只引用脱敏摘要、公开 SHA 与证据摘要，原始日志留在本机运行目录。
 

@@ -23,6 +23,8 @@ if "--version" in args:
     print("fake-codex 0.0.0")
     raise SystemExit(0)
 
+assert "GIT_DIR" not in os.environ
+assert os.environ.get("GIT_CONFIG_COUNT") == "0"
 output = pathlib.Path(args[args.index("--output-last-message") + 1])
 scenario = os.environ.get("FAKE_CODEX_SCENARIO", "pass")
 
@@ -119,9 +121,11 @@ def _invoke(
     env = os.environ.copy()
     env["FAKE_CODEX_SCENARIO"] = scenario
     # Leave a malformed inherited config in place to exercise the wrapper's
-    # single-command repair; the fake CLI does not consume git config.
-    env["GIT_CONFIG_COUNT"] = "10"
-    env.pop("GIT_CONFIG_KEY_0", None)
+    # repair for both the HEAD probe and the Codex process.
+    env["GIT_CONFIG_COUNT"] = "1"
+    env["GIT_CONFIG_KEY_0"] = "core.filemode"
+    env.pop("GIT_CONFIG_VALUE_0", None)
+    env["GIT_DIR"] = str(tmp_path / "unrelated-git-dir")
 
     completed = subprocess.run(
         [
