@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import urllib.error
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any
 
@@ -289,13 +290,24 @@ def refresh_one(account: dict[str, Any]) -> dict[str, Any]:
 
 
 def refresh_accounts() -> list[dict[str, Any]]:
-    """立即查询全部已连接账号，各自更新余额、时间与失败状态。"""
+    """并行查询全部已连接账号，各自更新余额、时间与失败状态。
+
+    每个账号的查询互不阻塞：一个上游挂起或超时不影响其他账号完成更新。
+    """
+    connected = [
+        account
+        for account in storage.load_accounts()
+        if account.get("connection") == "connected" and (account.get("key") or account.get("token"))
+    ]
+    if not connected:
+        return []
     refreshed: list[dict[str, Any]] = []
-    for account in storage.load_accounts():
-        if account.get("connection") != "connected":
-            continue
-        refresh_one(account)
-        # 查询期间账号可能已被删除；原子检查存在才写回，避免复活。
-        if storage.save_account_if_present(account):
-            refreshed.append(account)
+    with ThreadPoolExecutor(max_workers=max(1, len(connected))) as pool:
+        futures = [pool.submit(refresh_one, account) for account in connected]
+        # 先完成的账号先写回：一个上游挂起不拖延其他账号的更新。
+        for future in as_completed(futures):
+            account = future.result()
+            # 查询期间账号可能已被删除；原子检查存在才写回，避免复活。
+            if storage.save_account_if_present(account):
+                refreshed.append(account)
     return refreshed
