@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>订阅管理</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="rail">
+      <a class="brand" href="?view=overview" data-page="overview"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>订阅管理</a>
+      <nav aria-label="主导航">
+        <a href="?view=overview" data-page="overview"><span class="nav-icon grid-icon" aria-hidden="true"></span>订阅总览</a>
+        <a href="?view=settings" data-page="settings"><span class="nav-icon list-icon" aria-hidden="true"></span>配置管理</a>
+      </nav>
+      <div class="profile"><span class="avatar" aria-hidden="true">我</span><div><b>我的工作台</b><small>管理员</small></div></div>
+    </header>
+    <main id="workspace"></main>
+  </div>
+  <dialog id="confirm" aria-labelledby="confirm-title"></dialog>
+  <p id="announcement" class="sr-only" role="status" aria-live="polite"></p>
+</body>
+</html>

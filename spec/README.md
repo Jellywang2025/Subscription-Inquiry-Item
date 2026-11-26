@@ -2,6 +2,10 @@
 
 每个业务目标维护一份 Spec。同一个版本可以交接多个切片。本地工单引用对应版本和验收编号。
 
+## 个人订阅管理 0.2.0
+
+首轮视觉评审。打开[审图页](planned/subscription-management/review.html)对照四组横竖屏图，或查看[产品 Spec](planned/subscription-management/product-spec.md)、[UI 草案](planned/subscription-management/ui-spec.md)和[验收基线](planned/subscription-management/acceptance.md)。
+
 ## 个人订阅额度看板 v0.1
 
 规格已归档，9 张本地工单已交付。参见[已确认规格](archived/personal-quota-dashboard.md)、[工单及验收索引](work-items/README.md)。
