@@ -140,13 +140,14 @@ function providerName(account) {
   return providers[account.provider]?.name || account.provider;
 }
 
+const CLOCK_FORMAT = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+const DAY_FORMAT = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+
 function displayClock(value) {
   const time = new Date(value);
   if (Number.isNaN(time.getTime())) return '';
-  const clock = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(time);
-  const today = new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(new Date());
-  const thatDay = new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(time);
-  return thatDay === today ? clock : `${thatDay} ${clock}`;
+  const clock = CLOCK_FORMAT.format(time);
+  return DAY_FORMAT.format(time) === DAY_FORMAT.format(new Date()) ? clock : `${DAY_FORMAT.format(time)} ${clock}`;
 }
 
 function showTime(account) {

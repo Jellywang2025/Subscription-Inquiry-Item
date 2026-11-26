@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -29,13 +30,22 @@ def account_fingerprint(credential: str | None) -> str:
 
 
 def _load(path: Path) -> dict[str, Any]:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    except ValueError:
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    """读取状态文件；文件不存在或内容损坏视为空，其他读取错误在短重试后上抛。"""
+    for attempt in range(2):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except OSError:
+            # Windows 上杀软或并发进程可能短暂持有文件；重试一次再向上报告。
+            if attempt == 0:
+                time.sleep(0.05)
+                continue
+            raise
+        except ValueError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+    return {}
 
 
 def save(source: str, credential: str | None, result: dict[str, Any]) -> None:
@@ -46,16 +56,18 @@ def save(source: str, credential: str | None, result: dict[str, Any]) -> None:
         with _LOCK:
             state = _load(path)
             state[source] = entry
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+            _write_state(path, state)
     except OSError:
         return
 
 
 def restore(source: str, credential: str | None) -> dict[str, Any] | None:
     """取回同一来源、同一账户的上次成功结果；账户变化或无记录时返回 None。"""
-    with _LOCK:
-        entry = _load(state_path()).get(source)
+    try:
+        with _LOCK:
+            entry = _load(state_path()).get(source)
+    except OSError:
+        return None
     if not isinstance(entry, dict):
         return None
     if entry.get("account") != account_fingerprint(credential):
@@ -91,6 +103,23 @@ def save_account(account: dict[str, Any]) -> None:
         _write_state(state_path(), state)
 
 
+def save_account_if_present(account: dict[str, Any]) -> bool:
+    """仅在账号仍存在时替换记录；已被删除时返回 False（不复活）。"""
+    with _LOCK:
+        state = _load(state_path())
+        accounts = state.get("accounts")
+        if not isinstance(accounts, list):
+            return False
+        account_id = account.get("id")
+        for index, item in enumerate(accounts):
+            if isinstance(item, dict) and item.get("id") == account_id:
+                accounts[index] = account
+                state["accounts"] = accounts
+                _write_state(state_path(), state)
+                return True
+        return False
+
+
 def delete_account(account_id: str) -> bool:
     """删除指定 id 的账号记录；不存在时返回 False。"""
     with _LOCK:
@@ -113,5 +142,9 @@ def _write_state(path: Path, state: dict[str, Any]) -> None:
     """先写临时文件再原子替换，避免崩溃或磁盘异常截断既有状态。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f"{path.name}.tmp-{os.getpid()}")
-    temporary.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-    os.replace(temporary, path)
+    try:
+        temporary.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+        os.replace(temporary, path)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        raise

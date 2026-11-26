@@ -117,9 +117,19 @@ def public_account(account: dict[str, Any]) -> dict[str, Any]:
     return {key: account[key] for key in ACCOUNT_PUBLIC_FIELDS if key in account}
 
 
+STATE_UNAVAILABLE: dict[str, Any] = {
+    "status": "error",
+    "error": "状态暂时不可读写，请稍后重试。",
+}
+
+
 def serve_accounts(handler: BaseHTTPRequestHandler) -> None:
     """GET /api/accounts：已配置账号的列表。"""
-    visible = [public_account(account) for account in storage.load_accounts()]
+    try:
+        visible = [public_account(account) for account in storage.load_accounts()]
+    except OSError:
+        _send_json(handler, 503, STATE_UNAVAILABLE)
+        return
     _send_json(handler, 200, {"status": "ok", "accounts": visible})
 
 
@@ -155,6 +165,9 @@ def serve_account_create(handler: BaseHTTPRequestHandler) -> None:
     except accounts.AccountError as error:
         _send_json(handler, 400, {"status": "error", "error": str(error)})
         return
+    except OSError:
+        _send_json(handler, 503, STATE_UNAVAILABLE)
+        return
     _send_json(handler, 200, {"status": "ok", "account": public_account(account)})
 
 
@@ -170,12 +183,20 @@ def serve_account_update(handler: BaseHTTPRequestHandler, account_id: str) -> No
     except accounts.AccountError as error:
         _send_json(handler, 400, {"status": "error", "error": str(error)})
         return
+    except OSError:
+        _send_json(handler, 503, STATE_UNAVAILABLE)
+        return
     _send_json(handler, 200, {"status": "ok", "account": public_account(account)})
 
 
 def serve_account_delete(handler: BaseHTTPRequestHandler, account_id: str) -> None:
     """DELETE /api/accounts/{id}：删除账号记录、凭据与缓存。"""
-    if not accounts.delete_account(account_id):
+    try:
+        removed = accounts.delete_account(account_id)
+    except OSError:
+        _send_json(handler, 503, STATE_UNAVAILABLE)
+        return
+    if not removed:
         _send_json(handler, 404, {"status": "error", "error": "找不到这条订阅。"})
         return
     _send_json(handler, 200, {"status": "ok"})
@@ -183,7 +204,11 @@ def serve_account_delete(handler: BaseHTTPRequestHandler, account_id: str) -> No
 
 def serve_refresh(handler: BaseHTTPRequestHandler) -> None:
     """POST /api/refresh：立即查询全部已连接账号，各自独立更新。"""
-    refreshed = accounts.refresh_accounts()
+    try:
+        refreshed = accounts.refresh_accounts()
+    except OSError:
+        _send_json(handler, 503, STATE_UNAVAILABLE)
+        return
     _send_json(handler, 200, {"status": "ok", "refreshed": len(refreshed)})
 
 
