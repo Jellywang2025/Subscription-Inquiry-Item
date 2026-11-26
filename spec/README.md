@@ -4,7 +4,7 @@
 
 ## 个人订阅管理 0.2.0
 
-首轮视觉评审。打开[审图页](planned/subscription-management/review.html)对照四组横竖屏图，或查看[产品 Spec](planned/subscription-management/product-spec.md)、[UI 草案](planned/subscription-management/ui-spec.md)和[验收基线](planned/subscription-management/acceptance.md)。
+需求与视觉风格已确认。[统一 Spec](implement/subscription-management.md)收录业务规则、八张视觉基准图和 AC-01 至 AC-09，供后续拆票引用。
 
 ## 个人订阅额度看板 v0.1
 
