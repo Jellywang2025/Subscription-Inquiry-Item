@@ -123,54 +123,64 @@ def open_chrome(directory: Path) -> Iterator[Browser]:
     node = shutil.which("node")
     if node is None or not CHROME.is_file():
         pytest.fail(f"需要 Chrome ({CHROME}) 及支持原生 WebSocket 的 Node.js 22+，实得 node={node!r}")
-    profile = directory / "chrome-profile"
-    port_file = profile / "DevToolsActivePort"
-    chrome_log = directory / "chrome.log"
-    flags = [
+    base_flags = [
         "--headless", "--disable-gpu", "--disable-background-networking", "--disable-default-apps",
-        "--no-first-run", "--no-default-browser-check", "--remote-debugging-port=0", f"--user-data-dir={profile}",
+        "--no-first-run", "--no-default-browser-check", "--remote-debugging-port=0",
     ]
     if os.environ.get("QUOTA_CONTRACT_CHROME_NO_SANDBOX") == "1":
         # Opt-in for running the loopback fixture in an already sandboxed Windows process.
-        flags.append("--no-sandbox")
-    with chrome_log.open("wb") as log:
-        chrome = subprocess.Popen(
-            [str(CHROME), *flags, "about:blank"],
-            stdout=log, stderr=subprocess.STDOUT,
-        )
-        try:
-            deadline = time.monotonic() + STARTUP_TIMEOUT
-            while chrome.poll() is None and time.monotonic() < deadline:
-                try:
-                    port, newline, _ = port_file.read_text(encoding="utf-8").partition("\n")
-                except (FileNotFoundError, PermissionError):
-                    # On Windows Chrome may still have the new file open for writing.
-                    pass
+        base_flags.append("--no-sandbox")
+    # Chrome 偶发不写出 DevToolsActivePort（启动竞争）：换 profile 有限重试。
+    attempts = 3
+    for attempt in range(attempts):
+        profile = directory / f"chrome-profile-{attempt}"
+        port_file = profile / "DevToolsActivePort"
+        chrome_log = directory / f"chrome-{attempt}.log"
+        with chrome_log.open("wb") as log:
+            chrome = subprocess.Popen(
+                [str(CHROME), *base_flags, f"--user-data-dir={profile}", "about:blank"],
+                stdout=log, stderr=subprocess.STDOUT,
+            )
+            try:
+                deadline = time.monotonic() + STARTUP_TIMEOUT
+                while chrome.poll() is None and time.monotonic() < deadline:
+                    try:
+                        port, newline, _ = port_file.read_text(encoding="utf-8").partition("\n")
+                    except (FileNotFoundError, PermissionError):
+                        # On Windows Chrome may still have the new file open for writing.
+                        pass
+                    else:
+                        if newline and port.isdecimal():
+                            break
+                    time.sleep(0.05)
                 else:
-                    if newline and port.isdecimal():
-                        break
-                time.sleep(0.05)
-            else:
-                pytest.fail(f"无法读取 Chrome 调试端口文件 {port_file}，退出码 {chrome.poll()}，日志 {chrome_log}")
-            with subprocess.Popen(
-                [node, str(BRIDGE), port], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                encoding="utf-8", bufsize=1,
-            ) as bridge:
-                browser = Browser(bridge)
-                try:
-                    yield browser
-                finally:
+                    stop(chrome)
+                    if attempt + 1 < attempts:
+                        continue
+                    pytest.fail(
+                        f"无法读取 Chrome 调试端口文件 {port_file}，退出码 {chrome.poll()}，日志 {chrome_log}"
+                    )
+                with subprocess.Popen(
+                    [node, str(BRIDGE), port], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    encoding="utf-8", bufsize=1,
+                ) as bridge:
+                    browser = Browser(bridge)
                     try:
-                        browser.call("Browser.close")
-                    except (RuntimeError, OSError):
-                        pass  # Chrome can close its transport before replying.
-                    stop(bridge)
-                    try:
-                        chrome.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        stop(chrome)
-        finally:
-            stop(chrome)
+                        yield browser
+                    finally:
+                        try:
+                            browser.call("Browser.close")
+                        except (RuntimeError, OSError):
+                            pass  # Chrome can close its transport before replying.
+                        stop(bridge)
+                        try:
+                            chrome.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            stop(chrome)
+                return
+            finally:
+                stop(chrome)
+    raise AssertionError("unreachable")
 
 
 @contextmanager
