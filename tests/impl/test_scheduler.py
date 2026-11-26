@@ -117,28 +117,35 @@ def test_interval_change_takes_effect_next_cycle(tmp_path: Path, monkeypatch: py
     storage.save_refresh_interval(15)
     refresher.start()
     try:
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 20
         while len(calls) < 1 and time.monotonic() < deadline:
             time.sleep(0.05)
+        assert calls, "首个周期应在 15 测试秒内执行"
+        saved_at = time.monotonic()
+        # 修改间隔并唤醒调度器：旧周期的剩余等待应被放弃。
         storage.save_refresh_interval(5)
-        gap_deadline = time.monotonic() + 12
+        refresher.reschedule()
+        gap_deadline = saved_at + 10
         while len(calls) < 2 and time.monotonic() < gap_deadline:
             time.sleep(0.05)
     finally:
         refresher.stop()
-    assert len(calls) >= 2
-    gap = calls[1] - calls[0]
-    assert gap < 10, f"间隔改为 5 测试秒后下一周期应缩短，实得 {gap:.1f} 秒"
+    assert len(calls) >= 2, "间隔改为 5 测试秒并唤醒后，下一周期应在 10 秒内执行"
+    gap = calls[1] - saved_at
+    assert gap < 8, f"修改间隔后的下一周期应按新间隔（约 5 测试秒），实得 {gap:.1f} 秒"
 
 
 def test_settings_api_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUOTA_STATE_FILE", str(tmp_path / "state.json"))
+    # 防止 API 测试意外唤醒真实单例调度线程。
+    monkeypatch.setattr(scheduler.REFRESHER, "reschedule", lambda: None)
     with configured_password():
         httpd = create_server(free_port())
         with httpd, serve_in_thread(httpd):
             port = int(httpd.server_address[1])
             initial = call(port, "/api/settings")
             assert initial["refresh_interval_minutes"] == 15
+            assert initial["allowed_intervals"] == [5, 10, 15, 30, 60]
             changed = call(
                 port,
                 "/api/settings/refresh-interval",

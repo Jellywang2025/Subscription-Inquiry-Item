@@ -312,6 +312,8 @@ def serve_refresh_interval(handler: BaseHTTPRequestHandler) -> None:
     except OSError:
         _send_json(handler, 503, STATE_UNAVAILABLE)
         return
+    # 唤醒调度线程：放弃旧周期剩余等待，按新间隔重新计时。
+    scheduler.REFRESHER.reschedule()
     _send_json(handler, 200, {"status": "ok", "refresh_interval_minutes": minutes})
 
 
