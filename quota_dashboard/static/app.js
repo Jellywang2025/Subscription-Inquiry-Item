@@ -550,14 +550,18 @@ async function handleAuthAction(action, trigger) {
       `/api/accounts/${encodeURIComponent(account.id)}/device/${action}`, { method: 'POST' }
     );
     const device = payload.device || { status: 'idle' };
+    // 响应可能晚于用户导航：仅在仍处于该账号的授权页时才渲染。
+    const stillOnAuth = route.view === 'auth' && route.id === account.id;
     if (device.status === 'connected' && account.connection !== 'connected') {
       await loadAccounts();
-      const fresh = readAccount();
-      renderAuthorization(fresh || account, device);
-    } else {
+      if (stillOnAuth) {
+        const fresh = readAccount();
+        renderAuthorization(fresh || account, device);
+      }
+    } else if (stillOnAuth) {
       renderAuthorization(account, device);
     }
-    if (action === 'check' && device.status !== 'connected') {
+    if (action === 'check' && device.status !== 'connected' && stillOnAuth) {
       pollAuthorization(account);
     }
   } catch (error) {
