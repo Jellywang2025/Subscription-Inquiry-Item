@@ -198,14 +198,15 @@ function card(account) {
     detail = `<div>套餐　${h(account.plan || '未填写')}</div><div>费用　${account.amount ? h(money(account.currency, account.amount) + ' / ' + account.cycle) : '未填写'}</div><div>续费日　${h(account.renewal || '未填写')}</div>`;
   } else {
     const balances = Array.isArray(account.balances) ? account.balances : [];
+    const hint = account.failed ? (account.error || '查询失败') : '尚未完成查询';
     metrics = account.updated
       ? balances.map((balance) => `<div class="metric"><div class="metric-label">可用余额 · ${h(balance.currency)}</div><strong>${h(money(balance.currency, balance.value))}</strong></div>`).join('')
-      : `<div class="metric bad"><strong>暂无可用余额</strong><small>${h(account.failed ? (account.error || '查询失败') : '尚未完成查询')}</small></div>`;
+      : `<div class="metric bad"><strong>暂无可用余额</strong><small>${h(hint)}</small></div>`;
     detail = account.updated
       ? balances.map((balance) => `<div>${h(balance.description || '')}</div>`).join('')
       : '<div>暂无余额明细</div>';
   }
-  if (account.failed && account.updated) {
+  if (account.updated && (account.failed || account.error)) {
     detail += `<div>${h(account.error || '刷新失败')} · 显示上次成功数据</div>`;
   }
   return `<article class="card ${tone}">

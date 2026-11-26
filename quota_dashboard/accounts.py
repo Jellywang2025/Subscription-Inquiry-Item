@@ -303,10 +303,15 @@ def refresh_accounts() -> list[dict[str, Any]]:
         return []
     refreshed: list[dict[str, Any]] = []
     with ThreadPoolExecutor(max_workers=max(1, len(connected))) as pool:
-        futures = [pool.submit(refresh_one, account) for account in connected]
+        future_map = {pool.submit(refresh_one, account): account for account in connected}
         # 先完成的账号先写回：一个上游挂起不拖延其他账号的更新。
-        for future in as_completed(futures):
-            account = future.result()
+        for future in as_completed(future_map):
+            account = future_map[future]
+            try:
+                account = future.result()
+            except Exception as error:  # noqa: BLE001 - 意外异常按该账号失败处理
+                account["failed"] = True
+                account["error"] = f"查询异常（{error}）"
             # 查询期间账号可能已被删除；原子检查存在才写回，避免复活。
             if storage.save_account_if_present(account):
                 refreshed.append(account)
