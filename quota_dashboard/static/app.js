@@ -66,7 +66,8 @@ async function apiFetch(path, options = {}) {
   });
   // 会话过期时服务端把 API 重定向到登录页；跟随后的 200 HTML 不是数据。
   if (response.redirected && new URL(response.url).pathname === '/login') {
-    location.href = response.url;
+    // 回跳目标用当前页面而非被拦截的 API 路径，登录后整页恢复视图。
+    location.href = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
     throw new Error('登录已过期，正在转入登录页。');
   }
   let payload = {};
@@ -275,6 +276,7 @@ function edit(draftName) {
   if (route.id && !account) {
     // 深链接的账号数据未到达时先显示占位，loadAccounts 完成后重渲染。
     if (!accountsLoaded) return loadingAccount();
+    if (accountsError) return accountLoadError();
     return missingAccount();
   }
   const provider = account?.provider || route.provider;
@@ -300,8 +302,8 @@ function edit(draftName) {
       </form>
       <aside class="panel side" aria-label="当前连接">
         <h2>${hasKey ? '当前连接' : '连接方式'}</h2>
-        <dl class="specimen"><dt>平台</dt><dd>${providers[provider]?.name || provider}</dd>
-          ${hasKey ? `<dt>已保存密钥</dt><dd>•••• ${h(account.key_tail)}</dd><dt>连接状态</dt><dd>${status(account)}</dd><dt>余额更新时间</dt><dd>${showTime(account)}</dd>`
+        <dl class="specimen"><dt>平台</dt><dd>${h(providers[provider]?.name || provider)}</dd>
+          ${hasKey ? `${account?.key_tail ? `<dt>已保存密钥</dt><dd>•••• ${h(account.key_tail)}</dd>` : ''}<dt>连接状态</dt><dd>${status(account)}</dd><dt>更新时间</dt><dd>${showTime(account)}</dd>`
             : `<dt>连接方式</dt><dd>${isCodex ? '官方设备码' : credentialName}</dd><dt>连接状态</dt><dd>待连接</dd>`}
         </dl>
       </aside>
@@ -314,6 +316,10 @@ function missingAccount() {
 
 function loadingAccount() {
   workspace.innerHTML = backLink() + heading('正在载入账号', '稍候片刻。');
+}
+
+function accountLoadError() {
+  workspace.innerHTML = backLink() + heading('账号加载失败', accountsError || '请稍后重试。');
 }
 
 function authorization() {
