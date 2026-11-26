@@ -19,6 +19,33 @@ from quota_dashboard.server import create_server
 ORIGINAL_KEY = "impl-deepseek-original-X987"
 REPLACEMENT_KEY = "impl-deepseek-replacement-Y654"
 INVALID_KEY = "impl-deepseek-invalid-Z321"
+MIMO_SK = "impl-mimo-original-Sk55"
+MIMO_REPLY: dict[str, Any] = {
+    "is_available": True,
+    "balance_infos": [
+        {
+            "cash_balance": "100.00",
+            "gift_balance": "20.00",
+            "frozen_balance": "20.00",
+            "credit_limit": "500.00",
+            "credit_available": "80.00",
+            "total_available": "200.00",
+        }
+    ],
+}
+MIMO_OVER_FROZEN_REPLY: dict[str, Any] = {
+    "is_available": False,
+    "balance_infos": [
+        {
+            "cash_balance": "8.00",
+            "gift_balance": "4.00",
+            "frozen_balance": "20.00",
+            "credit_limit": "500.00",
+            "credit_available": "3.00",
+            "total_available": "15.00",
+        }
+    ],
+}
 REPLY: dict[str, Any] = {
     "is_available": True,
     "balance_infos": [
@@ -37,6 +64,7 @@ ZERO_REPLY: dict[str, Any] = {
 @contextmanager
 def balance_service(
     routes: dict[str, tuple[int, dict[str, Any] | None]],
+    path: str = "/user/balance",
 ) -> Iterator[tuple[str, list[tuple[str, str | None]]]]:
     """按 Bearer 密钥路由回执的本地余额服务，返回 (base_url, 请求记录)。"""
     seen: list[tuple[str, str | None]] = []
@@ -88,6 +116,66 @@ def test_deepseek_balances_maps_each_currency() -> None:
 def test_deepseek_balances_tolerates_missing_infos() -> None:
     assert accounts_module.deepseek_balances({}) == []
     assert accounts_module.deepseek_balances({"balance_infos": "not-a-list"}) == []
+
+
+@pytest.mark.parametrize(
+    ("reply", "available"),
+    [(MIMO_REPLY, "180.00"), (MIMO_OVER_FROZEN_REPLY, "0.00")],
+    ids=["total-200-frozen-20", "frozen-exceeds-total"],
+)
+def test_mimo_balances_computes_spendable_and_details(reply: dict[str, Any], available: str) -> None:
+    balances = accounts_module.mimo_balances(reply)
+    assert balances == [
+        {
+            "currency": "CNY",
+            "value": available,
+            "description": (
+                f"现金 ¥{reply['balance_infos'][0]['cash_balance']}"
+                f" · 赠金 ¥{reply['balance_infos'][0]['gift_balance']}"
+                f" · 可用授信 ¥{reply['balance_infos'][0]['credit_available']}"
+                f" · 冻结 ¥{reply['balance_infos'][0]['frozen_balance']}"
+            ),
+        }
+    ]
+
+
+def test_mimo_balances_tolerates_missing_infos() -> None:
+    assert accounts_module.mimo_balances({}) == []
+    assert accounts_module.mimo_balances({"balance_infos": []}) == []
+
+
+def test_create_and_refresh_mimo_account(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("QUOTA_STATE_FILE", str(tmp_path / "state.json"))
+    with balance_service(
+        {f"Bearer {MIMO_SK}": (200, MIMO_REPLY)}, path="/v1/platform/balance"
+    ) as stub:
+        monkeypatch.setenv("QUOTA_MIMO_BASE_URL", stub[0])
+        account = accounts_module.create_account("mimo", "晴岚", MIMO_SK)
+        assert account["provider"] == "mimo"
+        assert account["key_tail"] == MIMO_SK[-4:]
+        assert account["balances"][0]["value"] == "180.00"
+        assert stub[1] == [("/v1/platform/balance", f"Bearer {MIMO_SK}")]
+
+        with balance_service(
+            {f"Bearer {MIMO_SK}": (200, MIMO_OVER_FROZEN_REPLY)}, path="/v1/platform/balance"
+        ) as updated:
+            monkeypatch.setenv("QUOTA_MIMO_BASE_URL", updated[0])
+            refreshed = accounts_module.refresh_accounts()
+            assert refreshed[0]["balances"][0]["value"] == "0.00"
+            assert refreshed[0]["failed"] is False
+
+
+def test_create_account_rejects_mimo_invalid_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("QUOTA_STATE_FILE", str(tmp_path / "state.json"))
+    with balance_service({}, path="/v1/platform/balance") as stub:
+        monkeypatch.setenv("QUOTA_MIMO_BASE_URL", stub[0])
+        with pytest.raises(accounts_module.AccountError, match="密钥验证失败"):
+            accounts_module.create_account("mimo", "晴岚", "impl-mimo-bad-key")
+        assert storage.load_accounts() == []
 
 
 def test_create_account_verifies_key_and_persists(

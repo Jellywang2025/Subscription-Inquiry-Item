@@ -7,18 +7,22 @@ from datetime import datetime
 from typing import Any
 
 from . import storage
-from .sources import deepseek
+from .sources import deepseek, mimo
 from .sources.http import describe_query_error
 
 CURRENCY_SIGNS = {"CNY": "¥", "USD": "$"}
+# 以密钥连接且先验证后保存的平台；其余平台在后续工单开放。
+KEY_PROVIDERS = frozenset({"deepseek", "mimo"})
 
 
 class AccountError(Exception):
     """账号操作的预期失败（验证不通过、找不到记录等），消息可直接展示。"""
 
 
-def _deepseek_base_url() -> str:
-    return os.environ.get("QUOTA_DEEPSEEK_BASE_URL", deepseek.DEFAULT_BASE_URL).rstrip("/")
+def _provider_base_url(provider: str) -> str:
+    if provider == "deepseek":
+        return os.environ.get("QUOTA_DEEPSEEK_BASE_URL", deepseek.DEFAULT_BASE_URL).rstrip("/")
+    return os.environ.get("QUOTA_MIMO_BASE_URL", mimo.DEFAULT_BASE_URL).rstrip("/")
 
 
 def _timestamp() -> str:
@@ -49,12 +53,46 @@ def deepseek_balances(data: dict[str, Any]) -> list[dict[str, str]]:
     return balances
 
 
-def verify_deepseek_key(key: str) -> dict[str, Any]:
-    """用提交的密钥向 DeepSeek 余额接口发起一次验证查询。
+def mimo_balances(data: dict[str, Any]) -> list[dict[str, str]]:
+    """MiMo 官方回执转卡片 balances：可动用余额 + 现金/赠金/授信/冻结明细。
+
+    官方响应当前固定单币种（CNY）；可动用金额取总额减冻结，最低为零。
+    """
+    infos = data.get("balance_infos")
+    if not isinstance(infos, list) or not infos or not isinstance(infos[0], dict):
+        return []
+    info = infos[0]
+    sign = CURRENCY_SIGNS.get("CNY", "")
+    return [
+        {
+            "currency": "CNY",
+            "value": mimo.available_amount(data),
+            "description": (
+                f"现金 {sign}{info.get('cash_balance', '0.00')}"
+                f" · 赠金 {sign}{info.get('gift_balance', '0.00')}"
+                f" · 可用授信 {sign}{info.get('credit_available', '0.00')}"
+                f" · 冻结 {sign}{info.get('frozen_balance', '0.00')}"
+            ),
+        }
+    ]
+
+
+def _balances_for(provider: str, data: dict[str, Any]) -> list[dict[str, str]]:
+    if provider == "mimo":
+        return mimo_balances(data)
+    return deepseek_balances(data)
+
+
+def _query_with_key(provider: str, key: str) -> dict[str, Any]:
+    """用指定密钥向对应平台的余额接口发起一次验证查询。
 
     验证失败抛出原始异常，由调用方转换为可展示的原因。
     """
-    return deepseek.fetch_balance(_deepseek_base_url(), key)
+    if provider == "deepseek":
+        return deepseek.fetch_balance(_provider_base_url(provider), key)
+    if provider == "mimo":
+        return mimo.fetch_balance(_provider_base_url(provider), key)
+    raise AccountError("该平台的账号连接尚未开放。")
 
 
 def _find_account(account_id: str) -> dict[str, Any] | None:
@@ -65,11 +103,11 @@ def _find_account(account_id: str) -> dict[str, Any] | None:
 
 
 def create_account(provider: str, name: str, key: str) -> dict[str, Any]:
-    """新增一个平台账号；DeepSeek 需先通过密钥验证。"""
-    if provider != "deepseek":
+    """新增一个平台账号；密钥平台需先验证再保存。"""
+    if provider not in KEY_PROVIDERS:
         raise AccountError("该平台的账号连接尚未开放。")
     try:
-        data = verify_deepseek_key(key)
+        data = _query_with_key(provider, key)
     except Exception as error:  # noqa: BLE001 - 验证失败统一转为页面提示
         raise AccountError(f"密钥验证失败：{describe_query_error(error)}。当前连接未保存。") from error
     account: dict[str, Any] = {
@@ -82,7 +120,7 @@ def create_account(provider: str, name: str, key: str) -> dict[str, Any]:
         "updated": _timestamp(),
         "failed": False,
         "error": "",
-        "balances": deepseek_balances(data),
+        "balances": _balances_for(provider, data),
     }
     storage.save_account(account)
     return account
@@ -93,11 +131,12 @@ def update_account(account_id: str, name: str, key: str) -> dict[str, Any]:
     account = _find_account(account_id)
     if account is None:
         raise AccountError("找不到这条订阅。")
-    if account.get("provider") != "deepseek":
+    provider = str(account.get("provider") or "")
+    if provider not in KEY_PROVIDERS:
         raise AccountError("该平台的账号连接尚未开放。")
     if key:
         try:
-            data = verify_deepseek_key(key)
+            data = _query_with_key(provider, key)
         except Exception as error:  # noqa: BLE001 - 验证失败统一转为页面提示
             raise AccountError(
                 f"密钥验证失败：{describe_query_error(error)}。当前连接已保留。"
@@ -109,7 +148,7 @@ def update_account(account_id: str, name: str, key: str) -> dict[str, Any]:
                 "updated": _timestamp(),
                 "failed": False,
                 "error": "",
-                "balances": deepseek_balances(data),
+                "balances": _balances_for(provider, data),
             }
         )
     account["name"] = name
@@ -128,11 +167,12 @@ def refresh_accounts() -> list[dict[str, Any]]:
     for account in storage.load_accounts():
         if account.get("connection") != "connected":
             continue
+        provider = str(account.get("provider") or "")
         key = account.get("key")
         if not key:
             continue
         try:
-            data = deepseek.fetch_balance(_deepseek_base_url(), key)
+            data = _query_with_key(provider, key)
         except Exception as error:  # noqa: BLE001 - 单账号失败不阻断其他账号
             account["failed"] = True
             account["error"] = describe_query_error(error)
@@ -142,7 +182,7 @@ def refresh_accounts() -> list[dict[str, Any]]:
                     "updated": _timestamp(),
                     "failed": False,
                     "error": "",
-                    "balances": deepseek_balances(data),
+                    "balances": _balances_for(provider, data),
                 }
             )
         # 查询期间账号可能已被删除；原子检查存在才写回，避免复活。
