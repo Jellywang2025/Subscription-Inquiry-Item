@@ -190,6 +190,23 @@ def test_delete_account_removes_record(
     assert not accounts_module.delete_account(account["id"])
 
 
+def test_save_account_keeps_list_position(
+    deepseek_stub: tuple[str, list[tuple[str, str | None]]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("QUOTA_STATE_FILE", str(tmp_path / "state.json"))
+    first = accounts_module.create_account("deepseek", "青岚", ORIGINAL_KEY)
+    with balance_service({f"Bearer {REPLACEMENT_KEY}": (200, REPLY)}) as second_source:
+        monkeypatch.setenv("QUOTA_DEEPSEEK_BASE_URL", second_source[0])
+        second = accounts_module.create_account("deepseek", "松风", REPLACEMENT_KEY)
+    monkeypatch.setenv("QUOTA_DEEPSEEK_BASE_URL", deepseek_stub[0])
+    accounts_module.update_account(first["id"], "澄海", "")
+    assert [item["id"] for item in storage.load_accounts()] == [first["id"], second["id"]], (
+        "改名或换密钥不应改变账号在列表中的位置"
+    )
+
+
 def test_refresh_accounts_updates_each_independently(
     deepseek_stub: tuple[str, list[tuple[str, str | None]]],
     monkeypatch: pytest.MonkeyPatch,

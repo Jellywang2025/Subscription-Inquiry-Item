@@ -31,7 +31,9 @@ def account_fingerprint(credential: str | None) -> str:
 def _load(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except FileNotFoundError:
+        return {}
+    except ValueError:
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -72,19 +74,20 @@ def load_accounts() -> list[dict[str, Any]]:
 
 
 def save_account(account: dict[str, Any]) -> None:
-    """按 id 新增或整体替换一条账号记录（尽力而为，落盘失败不中断）。"""
+    """按 id 新增或整体替换一条账号记录，保持账号在列表中的原有位置。"""
     with _LOCK:
         state = _load(state_path())
         accounts = state.get("accounts")
         if not isinstance(accounts, list):
             accounts = []
         account_id = account.get("id")
-        remaining = [
-            item for item in accounts
-            if not (isinstance(item, dict) and item.get("id") == account_id)
-        ]
-        remaining.append(account)
-        state["accounts"] = remaining
+        for index, item in enumerate(accounts):
+            if isinstance(item, dict) and item.get("id") == account_id:
+                accounts[index] = account
+                break
+        else:
+            accounts.append(account)
+        state["accounts"] = accounts
         _write_state(state_path(), state)
 
 
@@ -107,5 +110,8 @@ def delete_account(account_id: str) -> bool:
 
 
 def _write_state(path: Path, state: dict[str, Any]) -> None:
+    """先写临时文件再原子替换，避免崩溃或磁盘异常截断既有状态。"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    temporary = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+    temporary.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    os.replace(temporary, path)

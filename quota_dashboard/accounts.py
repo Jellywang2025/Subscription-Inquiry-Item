@@ -145,6 +145,8 @@ def refresh_accounts() -> list[dict[str, Any]]:
                     "balances": deepseek_balances(data),
                 }
             )
-        storage.save_account(account)
-        refreshed.append(account)
+        # 查询期间账号可能已被删除；被删除的记录不再写回，避免复活。
+        if _find_account(str(account.get("id"))) is not None:
+            storage.save_account(account)
+            refreshed.append(account)
     return refreshed

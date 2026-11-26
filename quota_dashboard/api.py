@@ -129,10 +129,11 @@ def _read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
         length = int(handler.headers.get("Content-Length") or 0)
     except ValueError as error:
         raise accounts.AccountError("请求格式不正确。") from error
-    raw = handler.rfile.read(length).decode("utf-8") if length > 0 else ""
+    raw = handler.rfile.read(length) if length > 0 else b""
     try:
-        payload = json.loads(raw) if raw else {}
-    except ValueError as error:
+        text = raw.decode("utf-8")
+        payload = json.loads(text) if text else {}
+    except (UnicodeDecodeError, ValueError) as error:
         raise accounts.AccountError("请求体不是有效的 JSON。") from error
     if not isinstance(payload, dict):
         raise accounts.AccountError("请求体应为 JSON 对象。")
