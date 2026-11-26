@@ -87,7 +87,13 @@ def session_token(handler: BaseHTTPRequestHandler) -> str | None:
 
 
 def safe_next(raw: str | None) -> str:
-    """登录成功后的回跳目标：仅接受本站相对路径，其余回首页。"""
-    if not raw or not raw.startswith("/") or raw.startswith("//") or "\\" in raw:
+    """登录成功后的回跳目标：仅接受本站相对路径且不含控制字符，其余回首页。"""
+    if (
+        not raw
+        or not raw.startswith("/")
+        or raw.startswith("//")
+        or "\\" in raw
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in raw)
+    ):
         return "/"
     return raw

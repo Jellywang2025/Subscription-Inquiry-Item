@@ -84,16 +84,30 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return
         self.send_error(404)
 
+    def do_HEAD(self) -> None:  # noqa: N802 - http.server 接口约定
+        path = urlsplit(self.path).path
+        if path == "/login":
+            self._serve_login(head_only=True)
+            return
+        if path in PUBLIC_STATIC_PATHS:
+            super().do_HEAD()
+            return
+        if not self._has_valid_session():
+            self._redirect_to_login()
+            return
+        super().do_HEAD()
+
     # -- 登录页 ---------------------------------------------------------
 
-    def _serve_login(self, error: str = "") -> None:
+    def _serve_login(self, error: str = "", next_target: str | None = None, head_only: bool = False) -> None:
         if self._has_valid_session():
             self._redirect("/")
             return
-        query = parse_qs(urlsplit(self.path).query)
-        raw_next = query.get("next", [""])[0]
+        if next_target is None:
+            query = parse_qs(urlsplit(self.path).query)
+            next_target = query.get("next", [""])[0]
         page = (
-            LOGIN_PAGE.replace("{{next}}", html.escape(auth.safe_next(raw_next)))
+            LOGIN_PAGE.replace("{{next}}", html.escape(auth.safe_next(next_target)))
             .replace("{{error}}", html.escape(error) if error else "")
             .replace("{{error_attr}}", "" if error else " hidden")
         )
@@ -103,7 +117,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        if not head_only:
+            self.wfile.write(body)
 
     def _handle_login(self) -> None:
         try:
@@ -115,11 +130,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         password = form.get("password", [""])[0]
         target = auth.safe_next(form.get("next", [""])[0])
         if not auth.verify_password(password):
-            self._serve_login(error="口令不正确，请重试。")
+            self._serve_login(error="口令不正确，请重试。", next_target=target)
             return
         token = SESSIONS.create()
         self.send_response(302)
-        self.send_header("Location", target)
+        # 回跳目标重新百分号编码：请求头按 latin-1 写出，非 ASCII 原字符会失败。
+        self.send_header("Location", quote(target, safe="/%?&=#+,;:@!"))
         self.send_header(
             "Set-Cookie",
             f"{auth.SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; "

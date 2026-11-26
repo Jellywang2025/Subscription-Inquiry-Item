@@ -125,6 +125,29 @@ def test_login_rejects_wrong_password(protected_server: tuple[int, str]) -> None
     assert "口令不正确" in body.decode("utf-8")
 
 
+def test_login_failure_keeps_next_target(protected_server: tuple[int, str]) -> None:
+    port, _ = protected_server
+    status, _, body = login(port, "wrong-password", next_path="/?view=settings&platform=deepseek")
+    assert status == 200
+    page = body.decode("utf-8")
+    assert 'name="next" value="/?view=settings&amp;platform=deepseek"' in page
+
+
+def test_login_redirect_encodes_non_ascii_target(protected_server: tuple[int, str]) -> None:
+    port, _ = protected_server
+    # 回跳目标经表单解码后含中文时，Location 头必须重新百分号编码而非原样写出。
+    status, headers, _ = login(port, ADMIN_PASSWORD, next_path="/?q=青岚")
+    assert status == 302
+    assert headers["location"] == "/?q=%E9%9D%92%E5%B2%9A"
+
+
+def test_head_request_requires_session(protected_server: tuple[int, str]) -> None:
+    port, _ = protected_server
+    status, headers, _ = request(port, "HEAD", "/")
+    assert status == 302
+    assert headers["location"].startswith("/login?next=")
+
+
 def test_login_rejects_when_password_unconfigured(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -193,6 +216,46 @@ def test_accounts_api_requires_session(protected_server: tuple[int, str]) -> Non
     payload: dict[str, Any] = json.loads(body.decode("utf-8"))
     assert payload["status"] == "ok"
     assert payload["accounts"] == []
+
+
+def test_accounts_api_hides_credentials(
+    protected_server: tuple[int, str], monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    import json
+
+    state_file = tmp_path / "state.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "accounts": [
+                    {
+                        "id": "acc-1",
+                        "provider": "deepseek",
+                        "name": "青岚",
+                        "connection": "connected",
+                        "key": "sk-secret-credential-value",
+                        "key_tail": "alue",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("QUOTA_STATE_FILE", str(state_file))
+    port, _ = protected_server
+    _, headers, _ = login(port, ADMIN_PASSWORD)
+    cookie = session_cookie(headers)
+
+    status, _, body = request(port, "GET", "/api/accounts", headers={"Cookie": cookie})
+    assert status == 200
+    text = body.decode("utf-8")
+    payload: dict[str, Any] = json.loads(text)
+    account = payload["accounts"][0]
+    assert account["name"] == "青岚"
+    assert account["key_tail"] == "alue"
+    assert "sk-secret-credential-value" not in text
+    assert "key" not in account
 
 
 def test_account_create_returns_unavailable_for_now(

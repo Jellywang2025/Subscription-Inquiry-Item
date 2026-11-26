@@ -10,6 +10,7 @@ const confirmDialog = document.querySelector('#confirm');
 const announcement = document.querySelector('#announcement');
 const validViews = ['overview', 'settings', 'edit', 'auth'];
 let accounts = [];
+let accountsLoaded = false;
 let accountsError = '';
 let settingsFilters = { platform: '', q: '' };
 let cancellingFocus;
@@ -63,6 +64,11 @@ async function apiFetch(path, options = {}) {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
+  // 会话过期时服务端把 API 重定向到登录页；跟随后的 200 HTML 不是数据。
+  if (response.redirected && new URL(response.url).pathname === '/login') {
+    location.href = response.url;
+    throw new Error('登录已过期，正在转入登录页。');
+  }
   let payload = {};
   try { payload = await response.json(); } catch { /* 非 JSON 响应按空负载处理 */ }
   if (!response.ok) throw new Error(payload.error || `请求失败（HTTP ${response.status}）`);
@@ -78,7 +84,13 @@ async function loadAccounts() {
     accounts = [];
     accountsError = error.message;
   }
-  if (route.view === 'overview' || route.view === 'settings') renderResults();
+  accountsLoaded = true;
+  if (route.view === 'overview' || route.view === 'settings') {
+    renderResults();
+  } else if (route.id) {
+    // 编辑/授权深链接在账号数据到达前显示占位，数据到位后重渲染一次。
+    render();
+  }
 }
 
 function backLink() {
@@ -123,6 +135,10 @@ function glyph(account) {
   return `<span class="glyph" aria-hidden="true">${providers[account.provider]?.mark || '?'}</span>`;
 }
 
+function providerName(account) {
+  return providers[account.provider]?.name || account.provider;
+}
+
 function showTime(account) {
   return account.updated ? `${account.failed ? '上次成功' : '已更新'} ${h(account.updated)}` : '等待首次更新';
 }
@@ -135,14 +151,16 @@ function money(currency, value) {
 function quotaMetric(label, value, reset) {
   return `<div class="metric">
     <div class="metric-label">${h(label)}</div><strong>${h(value)}%</strong>
-    <div class="progress" role="progressbar" aria-label="${h(label)}" aria-valuenow="${h(value)}"><span style="width:${h(value)}%"></span></div>
+    <div class="progress" role="progressbar" aria-label="${h(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${h(value)}"><span style="width:${h(value)}%"></span></div>
     <small>${h(reset)} 重置</small>
   </div>`;
 }
 
+const cardTones = { codex: 'dark', mimo: 'soft' };
+
 function card(account) {
   const isCodex = account.provider === 'codex';
-  const tone = isCodex ? 'dark' : account.provider === 'mimo' ? 'soft' : '';
+  const tone = cardTones[account.provider] || '';
   let metrics;
   let detail;
   if (isCodex) {
@@ -185,21 +203,21 @@ function listRows(items) {
   return `<div class="list-wrap">
     <div class="table-head" aria-hidden="true"><span>账号名称</span><span class="secondary-cell">平台</span><span>连接状态</span><span class="secondary-cell">续费日／密钥</span><span>操作</span></div>
     <ul class="account-list">${items.map((account) => {
-      const platform = providers[account.provider].name;
-      const info = account.provider === 'codex' ? account.renewal || '未填写' : `•••• ${h(account.key_tail || '')}`;
+      const platform = providerName(account);
+      const info = account.provider === 'codex' ? account.renewal || '未填写' : `•••• ${account.key_tail || ''}`;
       return `<li>
         <div class="account-line">
           <div class="account">${glyph(account)}<b>${h(account.name)}</b></div>
-          <span class="secondary-cell muted">${platform}</span>
+          <span class="secondary-cell muted">${h(platform)}</span>
           <div>${status(account)}</div>
           <span class="secondary-cell muted">${h(info)}</span>
           <div class="actions" aria-label="${h(account.name)}的操作">
             ${account.provider === 'codex' ? `<a class="button quiet" href="${h(href({ view: 'auth', id: account.id }))}" data-link>${account.connection === 'connected' ? '重新授权' : '去授权'}</a>` : ''}
             <a class="button" href="${h(href({ view: 'edit', id: account.id }))}" data-link>编辑</a>
-            <button class="button quiet" data-remove="${account.id}">删除</button>
+            <button class="button quiet" data-remove="${h(account.id)}">删除</button>
           </div>
         </div>
-        <details class="line-details"><summary>账号明细</summary><div class="detail-list muted"><div>平台　${platform}</div><div>${account.provider === 'codex' ? '续费日' : '密钥'}　${h(info)}</div></div></details>
+        <details class="line-details"><summary>账号明细</summary><div class="detail-list muted"><div>平台　${h(platform)}</div><div>${account.provider === 'codex' ? '续费日' : '密钥'}　${h(info)}</div></div></details>
       </li>`;
     }).join('')}</ul>
   </div>`;
@@ -254,13 +272,17 @@ function metadataFields(account) {
 
 function edit(draftName) {
   const account = readAccount();
-  if (route.id && !account) return missingAccount();
+  if (route.id && !account) {
+    // 深链接的账号数据未到达时先显示占位，loadAccounts 完成后重渲染。
+    if (!accountsLoaded) return loadingAccount();
+    return missingAccount();
+  }
   const provider = account?.provider || route.provider;
   const isCodex = provider === 'codex';
-  const credentialName = providers[provider].keyLabel;
-  const hasKey = Boolean(account?.key_tail);
+  const credentialName = providers[provider]?.keyLabel || '';
+  const hasKey = Boolean(account?.key_tail) || account?.connection === 'connected';
   const title = account ? '编辑订阅' : '添加订阅';
-  workspace.innerHTML = backLink() + heading(title, account ? `${providers[provider].name} · ${h(account.name)}` : '选择平台，填写您用于识别账号的名称。')
+  workspace.innerHTML = backLink() + heading(title, account ? `${providers[provider]?.name || provider} · ${account.name}` : '选择平台，填写您用于识别账号的名称。')
     + `<div class="form-layout">
       <form class="panel" id="account-form" autocomplete="off">
         <h2>账号配置</h2>
@@ -278,7 +300,7 @@ function edit(draftName) {
       </form>
       <aside class="panel side" aria-label="当前连接">
         <h2>${hasKey ? '当前连接' : '连接方式'}</h2>
-        <dl class="specimen"><dt>平台</dt><dd>${providers[provider].name}</dd>
+        <dl class="specimen"><dt>平台</dt><dd>${providers[provider]?.name || provider}</dd>
           ${hasKey ? `<dt>已保存密钥</dt><dd>•••• ${h(account.key_tail)}</dd><dt>连接状态</dt><dd>${status(account)}</dd><dt>余额更新时间</dt><dd>${showTime(account)}</dd>`
             : `<dt>连接方式</dt><dd>${isCodex ? '官方设备码' : credentialName}</dd><dt>连接状态</dt><dd>待连接</dd>`}
         </dl>
@@ -290,10 +312,13 @@ function missingAccount() {
   workspace.innerHTML = backLink() + heading('找不到这条订阅', '返回配置管理查看当前账号。');
 }
 
+function loadingAccount() {
+  workspace.innerHTML = backLink() + heading('正在载入账号', '稍候片刻。');
+}
+
 function authorization() {
-  const account = readAccount();
-  if (!account || account.provider !== 'codex') return missingAccount();
-  return missingAccount();
+  // 设备码授权页随 Codex 连接工单交付；当前视图一律按未找到处理。
+  missingAccount();
 }
 
 function render() {
@@ -323,7 +348,7 @@ function showDelete(id, trigger) {
   cancellingFocus = trigger;
   confirmDialog.innerHTML = `<form method="dialog">
     <h2 id="confirm-title">删除订阅配置？</h2>
-    <p>确认删除「${h(account.name)}」（${providers[account.provider].name}）。看板将清除此条凭据和缓存，并停止查询。</p>
+    <p>确认删除「${h(account.name)}」（${h(providerName(account))}）。看板将清除此条凭据和缓存，并停止查询。</p>
     <div class="form-actions"><button class="button" value="cancel" autofocus>取消</button><button class="button delete" value="${h(account.id)}">确认删除</button></div>
   </form>`;
   confirmDialog.returnValue = 'cancel';

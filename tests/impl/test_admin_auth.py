@@ -84,3 +84,18 @@ def test_safe_next_accepts_relative_paths() -> None:
 )
 def test_safe_next_rejects_non_local_targets(raw: str | None) -> None:
     assert auth.safe_next(raw) == "/"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "/\r\nSet-Cookie: quota_session=attacker",
+        "/\t/evil.example/",
+        "/\n",
+        "/\x00",
+        "/\x7f",
+    ],
+)
+def test_safe_next_rejects_control_characters(raw: str) -> None:
+    # 控制字符可借 Location 头注入或被浏览器剥离后绕过 // 检查。
+    assert auth.safe_next(raw) == "/"
