@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import re
 import sys
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,6 +16,9 @@ DEFAULT_PORT = 8765
 
 # 无需登录即可获取的静态资源（登录页也要引用其中的样式）。
 PUBLIC_STATIC_PATHS = frozenset({"/styles.css", "/app.js", "/favicon.ico"})
+
+# 账号级 API 的路径参数：/api/accounts/{id}。
+ACCOUNT_PATH_PATTERN = re.compile(r"^/api/accounts/([A-Za-z0-9_-]+)$")
 
 SESSIONS = auth.SessionStore()
 LOGIN_PAGE = LOGIN_PAGE_PATH.read_text(encoding="utf-8")
@@ -81,6 +85,24 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 self._redirect_to_login()
                 return
             route(self)
+            return
+        match = ACCOUNT_PATH_PATTERN.match(path)
+        if match is not None:
+            if not self._has_valid_session():
+                self._redirect_to_login()
+                return
+            api.serve_account_update(self, match.group(1))
+            return
+        self.send_error(404)
+
+    def do_DELETE(self) -> None:  # noqa: N802 - http.server 接口约定
+        path = urlsplit(self.path).path
+        match = ACCOUNT_PATH_PATTERN.match(path)
+        if match is not None:
+            if not self._has_valid_session():
+                self._redirect_to_login()
+                return
+            api.serve_account_delete(self, match.group(1))
             return
         self.send_error(404)
 

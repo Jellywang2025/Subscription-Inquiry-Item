@@ -258,7 +258,7 @@ def test_accounts_api_hides_credentials(
     assert "key" not in account
 
 
-def test_account_create_returns_unavailable_for_now(
+def test_account_create_rejects_missing_fields(
     protected_server: tuple[int, str],
 ) -> None:
     port, _ = protected_server
@@ -271,8 +271,8 @@ def test_account_create_returns_unavailable_for_now(
         body=b"{}",
         headers={"Cookie": cookie, "Content-Type": "application/json"},
     )
-    assert status == 501
-    assert "暂时无法保存" in body.decode("utf-8")
+    assert status == 400
+    assert "请填写账号名称" in body.decode("utf-8")
 
 
 def test_unknown_post_returns_not_found(protected_server: tuple[int, str]) -> None:

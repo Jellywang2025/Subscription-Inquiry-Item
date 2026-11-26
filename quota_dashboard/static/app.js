@@ -140,8 +140,15 @@ function providerName(account) {
   return providers[account.provider]?.name || account.provider;
 }
 
+function displayClock(value) {
+  const time = new Date(value);
+  if (Number.isNaN(time.getTime())) return value;
+  return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(time);
+}
+
 function showTime(account) {
-  return account.updated ? `${account.failed ? '上次成功' : '已更新'} ${h(account.updated)}` : '等待首次更新';
+  if (!account.updated) return '等待首次更新';
+  return `${account.failed ? '上次成功' : '已更新'} ${displayClock(account.updated)}`;
 }
 
 function money(currency, value) {

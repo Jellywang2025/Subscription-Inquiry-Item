@@ -69,3 +69,43 @@ def load_accounts() -> list[dict[str, Any]]:
     if not isinstance(accounts, list):
         return []
     return [account for account in accounts if isinstance(account, dict)]
+
+
+def save_account(account: dict[str, Any]) -> None:
+    """按 id 新增或整体替换一条账号记录（尽力而为，落盘失败不中断）。"""
+    with _LOCK:
+        state = _load(state_path())
+        accounts = state.get("accounts")
+        if not isinstance(accounts, list):
+            accounts = []
+        account_id = account.get("id")
+        remaining = [
+            item for item in accounts
+            if not (isinstance(item, dict) and item.get("id") == account_id)
+        ]
+        remaining.append(account)
+        state["accounts"] = remaining
+        _write_state(state_path(), state)
+
+
+def delete_account(account_id: str) -> bool:
+    """删除指定 id 的账号记录；不存在时返回 False。"""
+    with _LOCK:
+        state = _load(state_path())
+        accounts = state.get("accounts")
+        if not isinstance(accounts, list):
+            return False
+        remaining = [
+            item for item in accounts
+            if not (isinstance(item, dict) and item.get("id") == account_id)
+        ]
+        if len(remaining) == len(accounts):
+            return False
+        state["accounts"] = remaining
+        _write_state(state_path(), state)
+        return True
+
+
+def _write_state(path: Path, state: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")

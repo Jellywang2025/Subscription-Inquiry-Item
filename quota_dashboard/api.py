@@ -2,14 +2,28 @@
 from __future__ import annotations
 
 import json
-import urllib.error
 from collections.abc import Callable
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from typing import Any
 
-from . import storage
+from . import accounts, storage
 from .sources import codex, deepseek, mimo
+from .sources.http import describe_query_error
+
+__all__ = [
+    "ROUTES",
+    "POST_ROUTES",
+    "serve_accounts",
+    "serve_account_create",
+    "serve_account_update",
+    "serve_account_delete",
+    "serve_refresh",
+    "serve_deepseek_balance",
+    "serve_mimo_balance",
+    "serve_codex_usage",
+    "describe_query_error",
+]
 
 # 账号记录中对页面可见的字段；凭据只在服务端保存。
 ACCOUNT_PUBLIC_FIELDS = (
@@ -30,22 +44,6 @@ ACCOUNT_PUBLIC_FIELDS = (
     "balances",
     "details",
 )
-
-
-def describe_query_error(error: Exception) -> str:
-    """把数据源查询异常转换为页面可展示的中文原因。"""
-    if isinstance(error, urllib.error.HTTPError):
-        return f"官方接口返回 HTTP {error.code}"
-    if isinstance(error, urllib.error.URLError):
-        reason = error.reason
-        if isinstance(reason, TimeoutError):
-            return "请求超时"
-        return f"连接失败（{reason}）"
-    if isinstance(error, TimeoutError):
-        return "请求超时"
-    if isinstance(error, PermissionError):
-        return str(error)
-    return f"查询异常（{error}）"
 
 
 def _send_json(handler: BaseHTTPRequestHandler, status: int, payload: dict[str, Any]) -> None:
@@ -121,22 +119,71 @@ def public_account(account: dict[str, Any]) -> dict[str, Any]:
 
 def serve_accounts(handler: BaseHTTPRequestHandler) -> None:
     """GET /api/accounts：已配置账号的列表。"""
-    accounts = [public_account(account) for account in storage.load_accounts()]
-    _send_json(handler, 200, {"status": "ok", "accounts": accounts})
+    visible = [public_account(account) for account in storage.load_accounts()]
+    _send_json(handler, 200, {"status": "ok", "accounts": visible})
+
+
+def _read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
+    """读取请求体的 JSON 对象；缺失或损坏时抛出账号错误。"""
+    try:
+        length = int(handler.headers.get("Content-Length") or 0)
+    except ValueError as error:
+        raise accounts.AccountError("请求格式不正确。") from error
+    raw = handler.rfile.read(length).decode("utf-8") if length > 0 else ""
+    try:
+        payload = json.loads(raw) if raw else {}
+    except ValueError as error:
+        raise accounts.AccountError("请求体不是有效的 JSON。") from error
+    if not isinstance(payload, dict):
+        raise accounts.AccountError("请求体应为 JSON 对象。")
+    return payload
 
 
 def serve_account_create(handler: BaseHTTPRequestHandler) -> None:
-    """POST /api/accounts：新增账号（保存服务尚未开放，返回明确错误）。"""
-    _send_json(handler, 501, {"status": "error", "error": "暂时无法保存，请稍后重试。"})
+    """POST /api/accounts：新增账号（DeepSeek 密钥先验证后保存）。"""
+    try:
+        payload = _read_json_body(handler)
+        provider = str(payload.get("provider") or "").strip()
+        name = str(payload.get("name") or "").strip()
+        key = str(payload.get("key") or "").strip()
+        if not name:
+            raise accounts.AccountError("请填写账号名称。")
+        if not key:
+            raise accounts.AccountError("请填写密钥。")
+        account = accounts.create_account(provider, name, key)
+    except accounts.AccountError as error:
+        _send_json(handler, 400, {"status": "error", "error": str(error)})
+        return
+    _send_json(handler, 200, {"status": "ok", "account": public_account(account)})
+
+
+def serve_account_update(handler: BaseHTTPRequestHandler, account_id: str) -> None:
+    """POST /api/accounts/{id}：编辑账号（改名保留连接，新密钥先验证再替换）。"""
+    try:
+        payload = _read_json_body(handler)
+        name = str(payload.get("name") or "").strip()
+        key = str(payload.get("key") or "").strip()
+        if not name:
+            raise accounts.AccountError("请填写账号名称。")
+        account = accounts.update_account(account_id, name, key)
+    except accounts.AccountError as error:
+        _send_json(handler, 400, {"status": "error", "error": str(error)})
+        return
+    _send_json(handler, 200, {"status": "ok", "account": public_account(account)})
+
+
+def serve_account_delete(handler: BaseHTTPRequestHandler, account_id: str) -> None:
+    """DELETE /api/accounts/{id}：删除账号记录、凭据与缓存。"""
+    if not accounts.delete_account(account_id):
+        _send_json(handler, 404, {"status": "error", "error": "找不到这条订阅。"})
+        return
+    _send_json(handler, 200, {"status": "ok"})
 
 
 def serve_refresh(handler: BaseHTTPRequestHandler) -> None:
-    """POST /api/refresh：立即刷新全部已连接账号。
-
-    本阶段没有已配置账号，刷新为空操作；账号查询在连接服务就绪后接入。
-    """
-    accounts = storage.load_accounts()
-    _send_json(handler, 200, {"status": "ok", "refreshed": len(accounts)})
+    """POST /api/refresh：立即查询全部已连接账号，各自独立更新。"""
+    refreshed = accounts.refresh_accounts()
+    _send_json(handler, 200, {"status": "ok", "refreshed": len(refreshed)})
 
 
 ROUTES: dict[str, Callable[[BaseHTTPRequestHandler], None]] = {
