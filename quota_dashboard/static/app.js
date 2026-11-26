@@ -215,7 +215,7 @@ function card(account) {
   if (account.updated && (account.failed || account.error)) {
     detail += `<div>${h(account.error || '刷新失败')} · 显示上次成功数据</div>`;
   }
-  return `<article class="card ${tone}">
+  return `<article class="card ${tone}" data-account-id="${h(account.id)}">
     <div class="card-head"><div class="account">${glyph(account)}<h3>${h(account.name)}</h3></div>${status(account)}</div>
     <div class="metric-row">${metrics}</div>
     <div class="card-footer"><details><summary>查看明细</summary><div class="detail-list">${detail}</div></details><span>${showTime(account)}</span></div>
@@ -239,7 +239,7 @@ function listRows(items) {
     <ul class="account-list">${items.map((account) => {
       const platform = providerName(account);
       const info = account.provider === 'codex' ? account.renewal || '未填写' : `•••• ${account.key_tail || ''}`;
-      return `<li>
+      return `<li data-account-id="${h(account.id)}">
         <div class="account-line">
           <div class="account">${glyph(account)}<b>${h(account.name)}</b></div>
           <span class="secondary-cell muted">${h(platform)}</span>
@@ -268,6 +268,12 @@ function renderResults() {
   }
   const items = visibleAccounts();
   counter.textContent = `${items.length} 个账号`;
+  // 重渲染会重建 DOM：先按账号记录展开的明细，渲染后恢复。
+  const expandedIds = new Set(
+    [...workspace.querySelectorAll('#results details[open]')]
+      .map(details => details.closest('[data-account-id]')?.dataset.accountId)
+      .filter(Boolean)
+  );
   let body;
   if (!items.length) {
     body = accounts.length
@@ -277,6 +283,11 @@ function renderResults() {
     body = route.view === 'settings' ? listRows(items) : overview(items);
   }
   workspace.querySelector('#results').innerHTML = body;
+  for (const id of expandedIds) {
+    workspace
+      .querySelectorAll(`[data-account-id="${CSS.escape(id)}"] details`)
+      .forEach(details => { details.open = true; });
+  }
 }
 
 function landing() {
