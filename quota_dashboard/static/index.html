@@ -3,76 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>个人订阅额度看板</title>
-  <style>
-    body { font-family: "Microsoft YaHei", system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #1f2329; }
-    header { padding: 16px 24px; background: #ffffff; border-bottom: 1px solid #e5e6eb; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-    h1 { font-size: 20px; margin: 0; }
-    #refresh-all { font-size: 14px; padding: 6px 18px; border: 1px solid #e5e6eb; border-radius: 6px; background: #ffffff; cursor: pointer; }
-    #refresh-all:hover { background: #f2f3f5; }
-    main { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding: 24px; max-width: 1080px; margin: 0 auto; }
-    .card { background: #ffffff; border: 1px solid #e5e6eb; border-radius: 10px; padding: 16px 20px; }
-    .card h2 { font-size: 16px; margin: 0 0 12px; }
-    .balances { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0 0 8px; }
-    .balances .amount { font-size: 26px; font-weight: 600; }
-    .meta { display: flex; flex-wrap: wrap; gap: 4px 16px; min-height: 20px; }
-    .status, .time { color: #86909c; margin: 0; }
-    .toggle { margin-top: 10px; font-size: 13px; color: #165dff; background: none; border: none; padding: 0; cursor: pointer; }
-    .detail { margin: 10px 0 0; padding: 10px 12px; background: #f7f8fa; border-radius: 6px; }
-    .detail div { display: flex; justify-content: space-between; font-size: 13px; line-height: 22px; }
-    .detail span { color: #4e5969; }
-    .detail strong { font-weight: 500; color: #1f2329; }
-    .window-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; font-size: 14px; line-height: 26px; }
-    .window-row .window-label { color: #4e5969; }
-    .window-row strong { font-weight: 600; }
-    .window-reset { color: #86909c; font-size: 13px; }
-    .official-link { display: inline-block; margin-top: 10px; font-size: 13px; color: #165dff; text-decoration: none; }
-    .official-link:hover { text-decoration: underline; }
-  </style>
+  <title>订阅管理</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script defer src="/app.js"></script>
 </head>
 <body>
-  <header>
-    <h1>个人订阅额度看板</h1>
-    <button type="button" id="refresh-all">刷新</button>
-  </header>
-  <main id="cards">
-    <section class="card" data-source="chatgpt">
-      <h2>ChatGPT 聊天</h2>
-      <div class="balances" data-role="balances"></div>
-      <p class="status" data-role="status">需前往官方查看</p>
-      <a class="official-link" href="https://chatgpt.com/" target="_blank" rel="noopener">前往官方查看</a>
-    </section>
-    <section class="card" data-source="codex">
-      <h2>Codex</h2>
-      <div class="balances" data-role="balances"></div>
-      <div class="meta">
-        <p class="status" data-role="status"></p>
-        <p class="time" data-role="time"></p>
-      </div>
-      <button type="button" class="toggle" data-role="toggle" hidden>明细</button>
-      <div class="detail" data-role="detail" hidden></div>
-    </section>
-    <section class="card" data-source="deepseek">
-      <h2>DeepSeek</h2>
-      <div class="balances" data-role="balances"></div>
-      <div class="meta">
-        <p class="status" data-role="status"></p>
-        <p class="time" data-role="time"></p>
-      </div>
-      <button type="button" class="toggle" data-role="toggle" hidden>明细</button>
-      <div class="detail" data-role="detail" hidden></div>
-    </section>
-    <section class="card" data-source="mimo">
-      <h2>MiMo</h2>
-      <div class="balances" data-role="balances"></div>
-      <div class="meta">
-        <p class="status" data-role="status"></p>
-        <p class="time" data-role="time"></p>
-      </div>
-      <button type="button" class="toggle" data-role="toggle" hidden>明细</button>
-      <div class="detail" data-role="detail" hidden></div>
-    </section>
-  </main>
-  <script src="/app.js"></script>
+  <div class="shell">
+    <header class="rail">
+      <a class="brand" href="?view=overview" data-page="overview"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>订阅管理</a>
+      <nav aria-label="主导航">
+        <a href="?view=overview" data-page="overview"><span class="nav-icon grid-icon" aria-hidden="true"></span>订阅总览</a>
+        <a href="?view=settings" data-page="settings"><span class="nav-icon list-icon" aria-hidden="true"></span>配置管理</a>
+      </nav>
+      <div class="profile"><span class="avatar" aria-hidden="true">我</span><div><b>我的工作台</b><small>管理员</small></div></div>
+    </header>
+    <main id="workspace"></main>
+  </div>
+  <dialog id="confirm" aria-labelledby="confirm-title"></dialog>
+  <p id="announcement" class="sr-only" role="status" aria-live="polite"></p>
 </body>
 </html>

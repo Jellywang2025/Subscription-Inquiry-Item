@@ -60,3 +60,12 @@ def restore(source: str, credential: str | None) -> dict[str, Any] | None:
         return None
     result = entry.get("result")
     return result if isinstance(result, dict) else None
+
+
+def load_accounts() -> list[dict[str, Any]]:
+    """已配置的订阅账号列表；未配置或状态损坏时为空列表。"""
+    with _LOCK:
+        accounts = _load(state_path()).get("accounts")
+    if not isinstance(accounts, list):
+        return []
+    return [account for account in accounts if isinstance(account, dict)]

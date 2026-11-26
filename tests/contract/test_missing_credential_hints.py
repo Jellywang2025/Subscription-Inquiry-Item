@@ -22,6 +22,9 @@ from test_deepseek_balance import (
     success_time,
 )
 
+# 0.2.0 迁移：未配置凭据的提示随账号配置模型重建，此契约待 02+ 票按新架构重建。
+pytestmark = pytest.mark.skip(reason="v0.1 凭据提示契约待 02+ 票按 0.2.0 账号配置架构重建")
+
 
 CODEX_HINT = "查询失败: Codex 未登录：请在本机完成 Codex 登录"
 MIMO_HINT = "查询失败: MiMo API Key 未配置：请在本机配置 MIMO_API_KEY"

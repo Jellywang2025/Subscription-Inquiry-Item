@@ -85,7 +85,7 @@ def open_entry(browser: Browser, url: str) -> None:
 
 def sign_in(browser: Browser, url: str, heading: str) -> None:
     open_entry(browser, url)
-    assert wait_for(browser, "password"), (
+    assert wait_for(browser, "Boolean(password)"), (
         f"未登录访问 {url} 应先显示管理员口令输入框，实际页面 {page_details(browser)}"
     )
     assert observe(browser, "!headings.includes('订阅总览') && !headings.includes('配置管理') && !accountCards.length"), (

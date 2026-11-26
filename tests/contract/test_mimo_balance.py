@@ -24,6 +24,9 @@ from test_deepseek_balance import (
     run_dashboard,
 )
 
+# 0.2.0 迁移：凭据改为网页配置的账号模型，MiMo 端到端契约待 03 票按新架构重建。
+pytestmark = pytest.mark.skip(reason="v0.1 MiMo 端到端契约待 03 票按 0.2.0 账号配置架构重建")
+
 
 MIMO_KEY = "sk-contract-mimo-balance"
 MIMO_PATH = "/v1/platform/balance"

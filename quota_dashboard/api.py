@@ -1,4 +1,4 @@
-"""看板的 JSON API：向页面提供各数据源的查询结果。"""
+"""订阅管理的 JSON API：向页面提供账号配置与各数据源的查询结果。"""
 from __future__ import annotations
 
 import json
@@ -10,6 +10,26 @@ from typing import Any
 
 from . import storage
 from .sources import codex, deepseek, mimo
+
+# 账号记录中对页面可见的字段；凭据只在服务端保存。
+ACCOUNT_PUBLIC_FIELDS = (
+    "id",
+    "provider",
+    "name",
+    "connection",
+    "updated",
+    "failed",
+    "error",
+    "plan",
+    "amount",
+    "currency",
+    "cycle",
+    "renewal",
+    "key_tail",
+    "windows",
+    "balances",
+    "details",
+)
 
 
 def describe_query_error(error: Exception) -> str:
@@ -94,8 +114,39 @@ def serve_codex_usage(handler: BaseHTTPRequestHandler) -> None:
     )
 
 
+def public_account(account: dict[str, Any]) -> dict[str, Any]:
+    """账号记录的页面投影：只保留可见字段，凭据不离开服务端。"""
+    return {key: account[key] for key in ACCOUNT_PUBLIC_FIELDS if key in account}
+
+
+def serve_accounts(handler: BaseHTTPRequestHandler) -> None:
+    """GET /api/accounts：已配置账号的列表。"""
+    accounts = [public_account(account) for account in storage.load_accounts()]
+    _send_json(handler, 200, {"status": "ok", "accounts": accounts})
+
+
+def serve_account_create(handler: BaseHTTPRequestHandler) -> None:
+    """POST /api/accounts：新增账号（保存服务尚未开放，返回明确错误）。"""
+    _send_json(handler, 501, {"status": "error", "error": "暂时无法保存，请稍后重试。"})
+
+
+def serve_refresh(handler: BaseHTTPRequestHandler) -> None:
+    """POST /api/refresh：立即刷新全部已连接账号。
+
+    本阶段没有已配置账号，刷新为空操作；账号查询在连接服务就绪后接入。
+    """
+    accounts = storage.load_accounts()
+    _send_json(handler, 200, {"status": "ok", "refreshed": len(accounts)})
+
+
 ROUTES: dict[str, Callable[[BaseHTTPRequestHandler], None]] = {
     "/api/sources/deepseek/balance": serve_deepseek_balance,
     "/api/sources/mimo/balance": serve_mimo_balance,
     "/api/sources/codex/balance": serve_codex_usage,
+    "/api/accounts": serve_accounts,
+}
+
+POST_ROUTES: dict[str, Callable[[BaseHTTPRequestHandler], None]] = {
+    "/api/accounts": serve_account_create,
+    "/api/refresh": serve_refresh,
 }

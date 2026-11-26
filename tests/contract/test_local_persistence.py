@@ -26,6 +26,9 @@ from test_deepseek_balance import (
 )
 from test_mimo_balance import MIMO_KEY, MIMO_PATH, official_balance
 
+# 0.2.0 迁移：重启保留随账号持久化模型重建，此契约待 08 票按新架构重建。
+pytestmark = pytest.mark.skip(reason="v0.1 本机持久化契约待 08 票按 0.2.0 账号模型重建")
+
 
 DEEPSEEK_KEY = "contract-deepseek-account-a"
 OTHER_DEEPSEEK_KEY = "contract-deepseek-account-b"

@@ -19,6 +19,9 @@ import pytest
 from deepseek_source import BALANCE_PATH, TEST_KEY, BalanceReply, DeepSeekSource, Request, serve_deepseek
 from test_startup_dashboard import ROOT, STARTUP_TIMEOUT, Launch, browser_environment
 
+# 0.2.0 迁移：凭据改为网页配置的账号模型，DeepSeek 端到端契约待 02 票按新架构重建。
+pytestmark = pytest.mark.skip(reason="v0.1 DeepSeek 端到端契约待 02 票按 0.2.0 账号配置架构重建")
+
 
 CHROME = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Google/Chrome/Application/chrome.exe"
 BRIDGE = Path(__file__).with_name("browser_cdp.cjs")

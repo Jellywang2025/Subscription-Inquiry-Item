@@ -1,196 +1,458 @@
-"use strict";
+'use strict';
 
-const CURRENCY_SYMBOLS = { CNY: "¥", USD: "$" };
-
-function currencySymbol(currency) {
-  return CURRENCY_SYMBOLS[currency] ?? `${currency} `;
-}
-
-function formatAmount(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed.toFixed(2) : value;
-}
-
-function amountLine(symbol, value) {
-  const line = document.createElement("div");
-  const amount = document.createElement("span");
-  amount.className = "amount";
-  amount.textContent = `${symbol}${formatAmount(value)}`;
-  line.append(amount);
-  return line;
-}
-
-function detailRow(label, value, symbol) {
-  const row = document.createElement("div");
-  const name = document.createElement("span");
-  name.textContent = label;
-  const amount = document.createElement("strong");
-  amount.textContent = `${symbol}${formatAmount(value)}`;
-  row.append(name, amount);
-  return row;
-}
-
-function windowRow(label, remainingPercent, resetAt) {
-  const row = document.createElement("div");
-  row.className = "window-row";
-  const name = document.createElement("span");
-  name.className = "window-label";
-  name.textContent = label;
-  const remaining = document.createElement("strong");
-  remaining.textContent = `剩余 ${remainingPercent}%`;
-  const reset = document.createElement("span");
-  reset.className = "window-reset";
-  reset.textContent = resetAt
-    ? `重置时间: ${new Date(resetAt * 1000).toLocaleString("zh-CN", { hour12: false })}`
-    : "重置时间: 未提供";
-  row.append(name, remaining, reset);
-  return row;
-}
-
-function codexWindowLine(label, window) {
-  return windowRow(label, Math.max(0, 100 - Math.round(window.used_percent)), window.reset_at);
-}
-
-function renderChatGptCard(shared) {
-  const card = document.querySelector('[data-source="chatgpt"]');
-  const status = card.querySelector('[data-role="status"]');
-  const balances = card.querySelector('[data-role="balances"]');
-  if (shared) {
-    balances.replaceChildren(windowRow(shared.label, shared.remaining_percent, shared.reset_at));
-    status.textContent = "";
-  } else {
-    balances.replaceChildren();
-    status.textContent = "需前往官方查看";
-  }
-}
-
-const SOURCE_RENDERERS = {
-  deepseek: {
-    balances(payload) {
-      return payload.data.balance_infos.map((info) =>
-        amountLine(currencySymbol(info.currency), info.total_balance),
-      );
-    },
-    details(payload) {
-      return payload.data.balance_infos.flatMap((info) => {
-        const symbol = currencySymbol(info.currency);
-        return [
-          [`${info.currency} 充值余额`, info.topped_up_balance],
-          [`${info.currency} 赠金`, info.granted_balance],
-        ].map(([label, value]) => detailRow(label, value, symbol));
-      });
-    },
-  },
-  codex: {
-    balances(payload) {
-      const rate = payload.data.rate_limit ?? {};
-      const windows = [
-        ["短窗口", rate.primary_window],
-        ["长窗口", rate.secondary_window],
-      ];
-      return windows.flatMap(([label, window]) => (window ? [codexWindowLine(label, window)] : []));
-    },
-    details() {
-      return [];
-    },
-    afterRender(payload) {
-      renderChatGptCard(payload.shared ?? null);
-    },
-  },
-  mimo: {
-    balances(payload) {
-      const info = payload.data.balance_infos[0];
-      return info ? [amountLine(currencySymbol(info.currency), payload.available)] : [];
-    },
-    details(payload) {
-      const info = payload.data.balance_infos[0];
-      if (!info) return [];
-      const symbol = currencySymbol(info.currency);
-      return [
-        ["现金", info.cash_balance],
-        ["赠金", info.gift_balance],
-        ["可用授信", info.credit_available],
-        ["冻结", info.frozen_balance],
-      ].map(([label, value]) => detailRow(label, value, symbol));
-    },
-  },
+const providers = {
+  codex: { name: 'Codex', mark: 'C' },
+  deepseek: { name: 'DeepSeek', mark: 'D', keyLabel: 'DeepSeek API Key' },
+  mimo: { name: 'MiMo', mark: 'M', keyLabel: 'MiMo SK' },
 };
+const workspace = document.querySelector('#workspace');
+const confirmDialog = document.querySelector('#confirm');
+const announcement = document.querySelector('#announcement');
+const validViews = ['overview', 'settings', 'edit', 'auth'];
+let accounts = [];
+let accountsError = '';
+let settingsFilters = { platform: '', q: '' };
+let cancellingFocus;
+let refreshInFlight = false;
 
-function createSourceController(name) {
-  const endpoint = `/api/sources/${name}/balance`;
-  let element = null;
-  let requestSeq = 0;
-  let hasResult = false;
+function escapeHtml(value = '') {
+  const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return String(value).replace(/[&<>"']/g, (character) => entities[character]);
+}
+const h = escapeHtml;
 
-  function card() {
-    element ??= document.querySelector(`[data-source="${name}"]`);
-    return element;
+function readRoute() {
+  const query = new URLSearchParams(location.search);
+  const view = query.get('view');
+  const platform = query.get('platform');
+  return {
+    view: validViews.includes(view) ? view : 'overview',
+    platform: Object.hasOwn(providers, platform) ? platform : '',
+    q: query.get('q') || '',
+    id: query.get('id') || '',
+    provider: Object.hasOwn(providers, query.get('provider')) ? query.get('provider') : 'codex',
+  };
+}
+let route = readRoute();
+if (route.view === 'settings') settingsFilters = { platform: route.platform, q: route.q };
+
+function href(values) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) {
+    if (value) query.set(key, value);
+  }
+  return `?${query}`;
+}
+
+function navigate(next) {
+  history.pushState(null, '', href(next));
+  route = readRoute();
+  if (route.view === 'settings') settingsFilters = { platform: route.platform, q: route.q };
+  render();
+  window.scrollTo(0, 0);
+  workspace.querySelector('h1')?.focus({ preventScroll: true });
+}
+
+function announce(message) {
+  announcement.textContent = '';
+  requestAnimationFrame(() => { announcement.textContent = message; });
+}
+
+async function apiFetch(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  let payload = {};
+  try { payload = await response.json(); } catch { /* 非 JSON 响应按空负载处理 */ }
+  if (!response.ok) throw new Error(payload.error || `请求失败（HTTP ${response.status}）`);
+  return payload;
+}
+
+async function loadAccounts() {
+  try {
+    const payload = await apiFetch('/api/accounts');
+    accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+    accountsError = '';
+  } catch (error) {
+    accounts = [];
+    accountsError = error.message;
+  }
+  if (route.view === 'overview' || route.view === 'settings') renderResults();
+}
+
+function backLink() {
+  return `<a class="back" href="${h(href({ view: 'settings', ...settingsFilters }))}" data-back>←　返回配置管理</a>`;
+}
+
+function heading(title, description, actions = '') {
+  return `<div class="page-head"><div><h1 tabindex="-1">${h(title)}</h1><p>${h(description)}</p></div>${actions}</div>`;
+}
+
+function platformOptions(current, includeAll = false) {
+  return `${includeAll ? '<option value="">全部平台</option>' : ''}${Object.entries(providers).map(([id, value]) =>
+    `<option value="${id}" ${current === id ? 'selected' : ''}>${value.name}</option>`
+  ).join('')}`;
+}
+
+function toolbar() {
+  return `<div class="toolbar">
+    <div class="filters">
+      <label class="search"><span class="sr-only">搜索账号名称</span><input class="field" id="search" type="search" autocomplete="off" placeholder="搜索账号名称" value="${h(route.q)}"></label>
+      <label><span class="sr-only">按平台筛选</span><select class="field" id="platform-filter">${platformOptions(route.platform, true)}</select></label>
+    </div>
+    <span class="result-count" id="count"></span>
+  </div>`;
+}
+
+function visibleAccounts() {
+  const term = route.q.trim().toLocaleLowerCase();
+  return accounts.filter((account) =>
+    (!route.platform || account.provider === route.platform) &&
+    account.name.toLocaleLowerCase().includes(term)
+  );
+}
+
+function status(account) {
+  if (account.failed) return '<span class="status issue">刷新失败</span>';
+  if (account.connection !== 'connected') return '<span class="status issue">待连接</span>';
+  return '<span class="status">已连接</span>';
+}
+
+function glyph(account) {
+  return `<span class="glyph" aria-hidden="true">${providers[account.provider]?.mark || '?'}</span>`;
+}
+
+function showTime(account) {
+  return account.updated ? `${account.failed ? '上次成功' : '已更新'} ${h(account.updated)}` : '等待首次更新';
+}
+
+function money(currency, value) {
+  const signs = { CNY: '¥', USD: '$' };
+  return `${signs[currency] || ''}${value}`;
+}
+
+function quotaMetric(label, value, reset) {
+  return `<div class="metric">
+    <div class="metric-label">${h(label)}</div><strong>${h(value)}%</strong>
+    <div class="progress" role="progressbar" aria-label="${h(label)}" aria-valuenow="${h(value)}"><span style="width:${h(value)}%"></span></div>
+    <small>${h(reset)} 重置</small>
+  </div>`;
+}
+
+function card(account) {
+  const isCodex = account.provider === 'codex';
+  const tone = isCodex ? 'dark' : account.provider === 'mimo' ? 'soft' : '';
+  let metrics;
+  let detail;
+  if (isCodex) {
+    const windows = Array.isArray(account.windows) ? account.windows : [];
+    metrics = account.updated
+      ? windows.map((window) => quotaMetric(
+        `${h(window.label)}剩余`, window.remaining, window.reset || '未提供'
+      )).join('')
+      : '<div class="metric bad"><strong>待授权</strong><small>从配置管理完成连接后查看额度</small></div>';
+    detail = `<div>套餐　${h(account.plan || '未填写')}</div><div>费用　${account.amount ? h(money(account.currency, account.amount) + ' / ' + account.cycle) : '未填写'}</div><div>续费日　${h(account.renewal || '未填写')}</div>`;
+  } else {
+    const balances = Array.isArray(account.balances) ? account.balances : [];
+    metrics = account.updated
+      ? balances.map((balance) => `<div class="metric"><div class="metric-label">可用余额 · ${h(balance.currency)}</div><strong>${h(money(balance.currency, balance.value))}</strong></div>`).join('')
+      : `<div class="metric bad"><strong>暂无余额</strong><small>${h(account.error || '尚未完成查询')}</small></div>`;
+    detail = account.updated
+      ? balances.map((balance) => `<div>${h(balance.description || '')}</div>`).join('')
+      : '<div>暂无余额明细</div>';
+  }
+  if (account.failed && account.updated) detail += '<div>请求超时 · 显示上次成功数据</div>';
+  return `<article class="card ${tone}">
+    <div class="card-head"><div class="account">${glyph(account)}<h3>${h(account.name)}</h3></div>${status(account)}</div>
+    <div class="metric-row">${metrics}</div>
+    <div class="card-footer"><details><summary>查看明细</summary><div class="detail-list">${detail}</div></details><span>${showTime(account)}</span></div>
+  </article>`;
+}
+
+function group(id, items) {
+  if (!items.length) return '';
+  return `<section aria-label="${providers[id].name}"><div class="section-title"><h2>${providers[id].name}</h2><span class="count">${items.length} 个账号</span></div><div class="cards">${items.map(card).join('')}</div></section>`;
+}
+
+function overview(items) {
+  const codex = group('codex', items.filter((account) => account.provider === 'codex'));
+  const balances = ['deepseek', 'mimo'].map((id) => group(id, items.filter((account) => account.provider === id))).join('');
+  return `${codex}${balances ? `<div class="balance-groups">${balances}</div>` : ''}`;
+}
+
+function listRows(items) {
+  return `<div class="list-wrap">
+    <div class="table-head" aria-hidden="true"><span>账号名称</span><span class="secondary-cell">平台</span><span>连接状态</span><span class="secondary-cell">续费日／密钥</span><span>操作</span></div>
+    <ul class="account-list">${items.map((account) => {
+      const platform = providers[account.provider].name;
+      const info = account.provider === 'codex' ? account.renewal || '未填写' : `•••• ${h(account.key_tail || '')}`;
+      return `<li>
+        <div class="account-line">
+          <div class="account">${glyph(account)}<b>${h(account.name)}</b></div>
+          <span class="secondary-cell muted">${platform}</span>
+          <div>${status(account)}</div>
+          <span class="secondary-cell muted">${h(info)}</span>
+          <div class="actions" aria-label="${h(account.name)}的操作">
+            ${account.provider === 'codex' ? `<a class="button quiet" href="${h(href({ view: 'auth', id: account.id }))}" data-link>${account.connection === 'connected' ? '重新授权' : '去授权'}</a>` : ''}
+            <a class="button" href="${h(href({ view: 'edit', id: account.id }))}" data-link>编辑</a>
+            <button class="button quiet" data-remove="${account.id}">删除</button>
+          </div>
+        </div>
+        <details class="line-details"><summary>账号明细</summary><div class="detail-list muted"><div>平台　${platform}</div><div>${account.provider === 'codex' ? '续费日' : '密钥'}　${h(info)}</div></div></details>
+      </li>`;
+    }).join('')}</ul>
+  </div>`;
+}
+
+function renderResults() {
+  const counter = workspace.querySelector('#count');
+  if (!counter) return;
+  if (accountsError) {
+    counter.textContent = '';
+    workspace.querySelector('#results').innerHTML =
+      `<section class="empty"><h2>账号加载失败</h2><p>${h(accountsError)}</p><button class="button" data-retry>重新加载</button></section>`;
+    return;
+  }
+  const items = visibleAccounts();
+  counter.textContent = `${items.length} 个账号`;
+  let body;
+  if (!items.length) {
+    body = accounts.length
+      ? '<section class="empty"><h2>没有匹配的订阅</h2><p>试试其他账号名称，或清除筛选条件。</p><button class="button" data-clear>清除条件</button></section>'
+      : '<section class="empty"><h2>还没有订阅</h2><p>添加账号后，这里会显示额度与余额。</p><button class="button primary" data-add>添加第一条订阅</button></section>';
+  } else {
+    body = route.view === 'settings' ? listRows(items) : overview(items);
+  }
+  workspace.querySelector('#results').innerHTML = body;
+}
+
+function landing() {
+  const settings = route.view === 'settings';
+  const actions = `<div class="actions">${settings ? '' : '<button class="button" id="refresh">↻　立即刷新</button>'}<button class="button primary" data-add>＋　添加订阅</button></div>`;
+  workspace.innerHTML = heading(
+    settings ? '配置管理' : '订阅总览',
+    settings ? '管理平台账号、连接凭据和刷新间隔。' : '查看各账号的剩余额度、可用余额和更新时间。',
+    actions
+  ) + toolbar() + `<div class="board">
+    <div id="results"></div>
+  </div>`;
+  renderResults();
+}
+
+function readAccount() {
+  return accounts.find((account) => account.id === route.id);
+}
+
+function metadataFields(account) {
+  return `<label class="control">套餐<input class="field" name="plan" value="${h(account?.plan)}" placeholder="例如 ChatGPT Pro" maxlength="60"></label>
+    <label class="control">费用<input class="field" name="amount" type="number" min="0" step="0.01" value="${h(account?.amount)}" placeholder="0.00"></label>
+    <label class="control">币种<select class="field" name="currency"><option value="USD" ${account?.currency === 'USD' ? 'selected' : ''}>USD</option><option value="CNY" ${account?.currency === 'CNY' ? 'selected' : ''}>CNY</option></select></label>
+    <label class="control">续费周期<select class="field" name="cycle">${['每月', '每年', '其他'].map((cycle) => `<option ${cycle === account?.cycle ? 'selected' : ''}>${cycle}</option>`).join('')}</select></label>
+    <label class="control">下次续费日<input class="field" name="renewal" type="date" value="${h(account?.renewal)}"></label>`;
+}
+
+function edit(draftName) {
+  const account = readAccount();
+  if (route.id && !account) return missingAccount();
+  const provider = account?.provider || route.provider;
+  const isCodex = provider === 'codex';
+  const credentialName = providers[provider].keyLabel;
+  const hasKey = Boolean(account?.key_tail);
+  const title = account ? '编辑订阅' : '添加订阅';
+  workspace.innerHTML = backLink() + heading(title, account ? `${providers[provider].name} · ${h(account.name)}` : '选择平台，填写您用于识别账号的名称。')
+    + `<div class="form-layout">
+      <form class="panel" id="account-form" autocomplete="off">
+        <h2>账号配置</h2>
+        <p class="intro">${isCodex ? '保存账号后可进入设备码授权。' : hasKey ? '填写并验证新密钥后，系统会替换当前密钥。' : '填写密钥并验证连接后保存。'}</p>
+        <div class="form-fields">
+          <label class="control">平台<select class="field" name="provider" aria-label="平台" ${account ? 'disabled' : ''}>${platformOptions(provider)}</select></label>
+          <label class="control">账号名称<input class="field" name="name" value="${h(draftName ?? account?.name)}" placeholder="自定名称" maxlength="50" required></label>
+          ${isCodex ? metadataFields(account) : `<label class="control full">${hasKey ? '新 ' : ''}${credentialName}<input class="field" name="key" type="password" placeholder="${hasKey ? '输入新密钥以替换' : '输入用于查询余额的密钥'}" maxlength="240" ${hasKey ? '' : 'required'}><small>${hasKey ? '留空可保留当前连接。' : '验证并保存后仅显示末四位。'}</small></label>`}
+        </div>
+        <div id="form-feedback" class="feedback" role="status" hidden></div>
+        <div class="form-actions">
+          <button class="button primary" type="submit">${isCodex ? (account ? '保存修改' : '保存并去授权') : '验证并保存'}</button>
+          <a class="button" href="${h(href({ view: 'settings', ...settingsFilters }))}" data-back>取消</a>
+        </div>
+      </form>
+      <aside class="panel side" aria-label="当前连接">
+        <h2>${hasKey ? '当前连接' : '连接方式'}</h2>
+        <dl class="specimen"><dt>平台</dt><dd>${providers[provider].name}</dd>
+          ${hasKey ? `<dt>已保存密钥</dt><dd>•••• ${h(account.key_tail)}</dd><dt>连接状态</dt><dd>${status(account)}</dd><dt>余额更新时间</dt><dd>${showTime(account)}</dd>`
+            : `<dt>连接方式</dt><dd>${isCodex ? '官方设备码' : credentialName}</dd><dt>连接状态</dt><dd>待连接</dd>`}
+        </dl>
+      </aside>
+    </div>`;
+}
+
+function missingAccount() {
+  workspace.innerHTML = backLink() + heading('找不到这条订阅', '返回配置管理查看当前账号。');
+}
+
+function authorization() {
+  const account = readAccount();
+  if (!account || account.provider !== 'codex') return missingAccount();
+  return missingAccount();
+}
+
+function render() {
+  const active = route.view === 'overview' ? 'overview' : 'settings';
+  document.querySelectorAll('nav a').forEach((link) => {
+    if (link.dataset.page === active) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
+  if (route.view === 'edit') return edit();
+  if (route.view === 'auth') return authorization();
+  landing();
+}
+
+function applyFilters() {
+  const platform = workspace.querySelector('#platform-filter').value;
+  const q = workspace.querySelector('#search').value;
+  const next = { view: route.view, platform, q };
+  history.replaceState(null, '', href(next));
+  route = readRoute();
+  if (route.view === 'settings') settingsFilters = { platform, q };
+  renderResults();
+}
+
+function showDelete(id, trigger) {
+  const account = accounts.find((item) => item.id === id);
+  if (!account) return;
+  cancellingFocus = trigger;
+  confirmDialog.innerHTML = `<form method="dialog">
+    <h2 id="confirm-title">删除订阅配置？</h2>
+    <p>确认删除「${h(account.name)}」（${providers[account.provider].name}）。看板将清除此条凭据和缓存，并停止查询。</p>
+    <div class="form-actions"><button class="button" value="cancel" autofocus>取消</button><button class="button delete" value="${h(account.id)}">确认删除</button></div>
+  </form>`;
+  confirmDialog.returnValue = 'cancel';
+  confirmDialog.showModal();
+}
+
+confirmDialog.addEventListener('close', async () => {
+  const deleted = accounts.find((account) => account.id === confirmDialog.returnValue);
+  if (!deleted) {
+    cancellingFocus?.focus();
+    return;
+  }
+  try {
+    await apiFetch(`/api/accounts/${encodeURIComponent(deleted.id)}`, { method: 'DELETE' });
+    announce(`已删除 ${deleted.name}`);
+    await loadAccounts();
+    workspace.querySelector('#search')?.focus();
+  } catch (error) {
+    announce(`删除失败：${error.message}`);
+    cancellingFocus?.focus();
+  }
+});
+
+async function refreshNow(trigger) {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  const label = trigger.textContent;
+  trigger.disabled = true;
+  trigger.textContent = '正在刷新…';
+  try {
+    await apiFetch('/api/refresh', { method: 'POST' });
+    await loadAccounts();
+    announce('刷新完成');
+  } catch (error) {
+    announce(`刷新失败：${error.message}`);
+  } finally {
+    refreshInFlight = false;
+    trigger.disabled = false;
+    trigger.textContent = label;
+  }
+}
+
+document.addEventListener('click', (event) => {
+  const target = event.target.closest('button, a');
+  if (!target || (target.tagName === 'A' && (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey))) return;
+  if (target.hasAttribute('data-page') || target.hasAttribute('data-link') || target.hasAttribute('data-back')) {
+    event.preventDefault();
+    const next = Object.fromEntries(new URL(target.href).searchParams);
+    navigate(next);
+  } else if (target.hasAttribute('data-add')) {
+    navigate({ view: 'edit' });
+  } else if (target.hasAttribute('data-clear')) {
+    workspace.querySelector('#search').value = '';
+    workspace.querySelector('#platform-filter').value = '';
+    applyFilters();
+    workspace.querySelector('#search').focus();
+  } else if (target.hasAttribute('data-retry')) {
+    loadAccounts();
+  } else if (target.dataset.remove) {
+    showDelete(target.dataset.remove, target);
+  } else if (target.id === 'refresh') {
+    refreshNow(target);
+  }
+});
+
+workspace.addEventListener('input', (event) => {
+  if (event.target.id === 'search') applyFilters();
+});
+workspace.addEventListener('change', (event) => {
+  if (event.target.id === 'platform-filter') applyFilters();
+  const form = event.target.closest('#account-form');
+  if (form && event.target.name === 'provider') {
+    route.provider = event.target.value;
+    history.replaceState(null, '', href(route));
+    edit(form.elements.name.value);
+    workspace.querySelector('[name="provider"]').focus();
+  }
+});
+workspace.addEventListener('submit', async (event) => {
+  if (event.target.id !== 'account-form') return;
+  event.preventDefault();
+  const form = event.target;
+  const input = new FormData(form);
+  const previous = readAccount();
+  const provider = previous?.provider || route.provider;
+  const name = input.get('name').trim();
+  const key = (input.get('key') || '').trim();
+  const feedback = form.querySelector('#form-feedback');
+  const submitButton = form.querySelector('button[type=submit]');
+
+  if (!name) {
+    feedback.className = 'feedback error';
+    feedback.textContent = '请填写账号名称。';
+    feedback.hidden = false;
+    return;
   }
 
-  function render(payload) {
-    const target = card();
-    const renderer = SOURCE_RENDERERS[name];
-    target.querySelector('[data-role="status"]').textContent = "";
-    target.querySelector('[data-role="time"]').textContent = `成功时间: ${formatTime(payload.fetched_at)}`;
-    target.querySelector('[data-role="balances"]').replaceChildren(...renderer.balances(payload));
-    const details = renderer.details(payload);
-    target.querySelector('[data-role="detail"]').replaceChildren(...details);
-    target.querySelector('[data-role="toggle"]').hidden = details.length === 0;
-    renderer.afterRender?.(payload);
-  }
-
-  async function refresh() {
-    const seq = ++requestSeq;
-    const hadResult = hasResult;
-    const status = card().querySelector('[data-role="status"]');
-    status.textContent = "查询中";
-    try {
-      const response = await fetch(endpoint, { cache: "no-store" });
-      const payload = await response.json();
-      if (seq !== requestSeq) return; // 已有更新的查询，本结果作废
-      if (payload.status !== "ok") {
-        if (!hadResult && payload.last_success) {
-          hasResult = true;
-          render(payload.last_success); // 本轮尚无结果时，先呈现持久化的上次成功结果
-        }
-        throw new Error(payload.error || "未知错误");
-      }
-      hasResult = true;
-      render(payload);
-    } catch (error) {
-      if (seq !== requestSeq) return;
-      const label = hadResult ? "刷新失败" : "查询失败";
-      status.textContent = `${label}: ${error.message || error}`;
+  const payload = { provider, name };
+  if (provider === 'codex') {
+    for (const field of ['plan', 'amount', 'currency', 'cycle', 'renewal']) {
+      payload[field] = (input.get(field) || '').trim();
     }
+  } else if (key || !previous) {
+    payload.key = key;
   }
 
-  function init() {
-    const toggle = card().querySelector('[data-role="toggle"]');
-    const detail = card().querySelector('[data-role="detail"]');
-    toggle.addEventListener("click", () => {
-      detail.hidden = !detail.hidden;
+  submitButton.disabled = true;
+  try {
+    await apiFetch(previous ? `/api/accounts/${encodeURIComponent(previous.id)}` : '/api/accounts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     });
+    announce('已保存订阅配置');
+    await loadAccounts();
+    navigate({ view: 'settings', ...settingsFilters });
+  } catch (error) {
+    feedback.className = 'feedback error';
+    feedback.textContent = `保存失败：${error.message}`;
+    feedback.hidden = false;
+  } finally {
+    submitButton.disabled = false;
   }
+});
 
-  return { refresh, init };
-}
+window.addEventListener('popstate', () => {
+  route = readRoute();
+  if (route.view === 'settings') settingsFilters = { platform: route.platform, q: route.q };
+  render();
+});
 
-function formatTime(iso) {
-  return new Date(iso).toLocaleTimeString("zh-CN", { hour12: false });
-}
-
-const CONTROLLERS = Object.fromEntries(
-  Object.keys(SOURCE_RENDERERS).map((name) => [name, createSourceController(name)]),
-);
-
-function refreshAll() {
-  return Promise.allSettled(Object.values(CONTROLLERS).map((controller) => controller.refresh()));
-}
-
-function init() {
-  Object.values(CONTROLLERS).forEach((controller) => controller.init());
-  document.getElementById("refresh-all").addEventListener("click", refreshAll);
-  refreshAll();
-}
-
-document.addEventListener("DOMContentLoaded", init);
+render();
+loadAccounts();

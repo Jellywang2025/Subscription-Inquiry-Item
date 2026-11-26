@@ -10,7 +10,7 @@ from .server import DEFAULT_PORT
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="quota_dashboard",
-        description="个人订阅额度看板（Windows 本机服务）",
+        description="个人订阅管理系统（本机/服务器服务 + 浏览器管理页）",
     )
     parser.add_argument(
         "--port",

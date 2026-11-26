@@ -11,7 +11,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from ctypes import wintypes
 from dataclasses import dataclass
-from html.parser import HTMLParser
 from pathlib import Path
 from urllib.error import URLError
 from urllib.parse import urlsplit
@@ -23,6 +22,7 @@ import pytest
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="AC-01 uses a Windows batch entry")
 
 ROOT = Path(__file__).resolve().parents[2]
+# v0.1 平台清单：0.2.0 移除 ChatGPT 聊天卡片，此常量仅供待迁移的 v0.1 契约模块导入。
 PLATFORMS = ("ChatGPT 聊天", "Codex", "DeepSeek", "MiMo")
 STARTUP_TIMEOUT = 8
 HTTP = build_opener(ProxyHandler({}))
@@ -191,67 +191,18 @@ def running_dashboard(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Dash
         yield Dashboard(url, port, wait_for_dashboard(url, launch), launch)
 
 
-class CardText(HTMLParser):
-    """Collect text per HTML container without depending on CSS classes or IDs."""
-
-    VOID = frozenset("area base br col embed hr img input link meta param source track wbr".split())
-    NON_VISIBLE = {"head", "script", "style", "template"}
-
-    def __init__(self, page: str) -> None:
-        super().__init__()
-        self.containers: list[str] = []
-        self.stack: list[tuple[str, bool, list[str]]] = []
-        self.feed(page)
-        self.close()
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in self.VOID:
-            return
-        hidden = (
-            tag in self.NON_VISIBLE
-            or "hidden" in dict(attrs)
-            or bool(self.stack and self.stack[-1][1])
-        )
-        self.stack.append((tag, hidden, []))
-
-    def handle_endtag(self, tag: str) -> None:
-        if not any(name == tag for name, _, _ in self.stack):
-            return
-        while self.stack:
-            name, hidden, parts = self.stack.pop()
-            if not hidden:
-                if name not in {"body", "html"}:
-                    self.containers.append(" ".join(" ".join(parts).split()))
-                if self.stack:
-                    self.stack[-1][2].extend(parts)
-            if name == tag:
-                break
-
-    def handle_data(self, data: str) -> None:
-        if self.stack and not self.stack[-1][1]:
-            self.stack[-1][2].append(data)
-
-
-def test_ac01_batch_serves_dashboard(running_dashboard: Dashboard) -> None:
-    assert "个人订阅额度看板" in running_dashboard.page
+def test_ac01_batch_serves_login_gate(running_dashboard: Dashboard) -> None:
+    # 0.2.0：启动入口先提供管理员登录页，登录后的总览由 01 票契约用例覆盖。
+    assert "订阅管理" in running_dashboard.page
+    assert 'type="password"' in running_dashboard.page
 
 
 def test_ac01_first_launch_opens_dashboard(running_dashboard: Dashboard) -> None:
     assert_dashboard_url(wait_for_browser(running_dashboard.launch), running_dashboard.url)
 
 
-@pytest.mark.parametrize("platform", PLATFORMS)
-def test_ac01_card_exists(running_dashboard: Dashboard, platform: str) -> None:
-    containers = CardText(running_dashboard.page).containers
-    card_text = [
-        text for text in containers
-        if platform in text and all(other == platform or other not in text for other in PLATFORMS)
-    ]
-    assert card_text, f"看板缺少 {platform} 卡片"
-
-
 def test_ac01_running_dashboard_reopens_without_error(running_dashboard: Dashboard, tmp_path: Path) -> None:
     with launch_batch(running_dashboard.port, tmp_path, "second") as second_launch:
         assert_dashboard_url(wait_for_browser(second_launch), running_dashboard.url)
         assert running_dashboard.launch.process.poll() in (None, 0), running_dashboard.launch.diagnostics()
-        assert "个人订阅额度看板" in wait_for_dashboard(running_dashboard.url, second_launch)
+        assert "订阅管理" in wait_for_dashboard(running_dashboard.url, second_launch)
