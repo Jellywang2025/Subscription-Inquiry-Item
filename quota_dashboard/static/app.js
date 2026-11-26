@@ -387,7 +387,7 @@ function renderAuthorization(account, device) {
   const state = device.status || 'idle';
   const isConnected = state === 'connected' || (state === 'idle' && account.connection === 'connected');
   // 状态未变化时跳过重渲染，保住用户正在操作的键盘焦点。
-  const signature = JSON.stringify([account.id, account.name, account.connection, state, device.user_code, device.error]);
+  const signature = JSON.stringify([account.id, account.name, account.connection, state, device.user_code, device.error || '']);
   if (signature === lastAuthSignature) return;
   lastAuthSignature = signature;
   let content;

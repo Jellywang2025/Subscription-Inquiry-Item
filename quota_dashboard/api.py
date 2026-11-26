@@ -253,7 +253,10 @@ def serve_device_start(handler: BaseHTTPRequestHandler, account_id: str) -> None
     _send_json(
         handler,
         200,
-        {"status": "ok", "device": {"status": session.status, "user_code": session.user_code}},
+        {
+            "status": "ok",
+            "device": {"status": session.status, "user_code": session.user_code, "error": ""},
+        },
     )
 
 
