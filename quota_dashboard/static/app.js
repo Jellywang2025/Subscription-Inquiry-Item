@@ -382,8 +382,11 @@ function pollAuthorization(account) {
         // 授权刚完成：停止轮询，拉取最新账号数据后渲染一次。
         stopAuthPolling();
         await loadAccounts();
-        const fresh = readAccount();
-        renderAuthorization(fresh || account, device);
+        // 数据拉取期间用户可能已导航；渲染前重新核对当前视图。
+        if (route.view === 'auth' && route.id === account.id) {
+          const fresh = readAccount();
+          renderAuthorization(fresh || account, device);
+        }
         return;
       }
       renderAuthorization(account, device);
@@ -550,18 +553,18 @@ async function handleAuthAction(action, trigger) {
       `/api/accounts/${encodeURIComponent(account.id)}/device/${action}`, { method: 'POST' }
     );
     const device = payload.device || { status: 'idle' };
-    // 响应可能晚于用户导航：仅在仍处于该账号的授权页时才渲染。
-    const stillOnAuth = route.view === 'auth' && route.id === account.id;
+    const stillOnAuth = () => route.view === 'auth' && route.id === account.id;
     if (device.status === 'connected' && account.connection !== 'connected') {
       await loadAccounts();
-      if (stillOnAuth) {
+      // 数据拉取期间用户可能已导航；渲染前重新核对当前视图。
+      if (stillOnAuth()) {
         const fresh = readAccount();
         renderAuthorization(fresh || account, device);
       }
-    } else if (stillOnAuth) {
+    } else if (stillOnAuth()) {
       renderAuthorization(account, device);
     }
-    if (action === 'check' && device.status !== 'connected' && stillOnAuth) {
+    if (action === 'check' && device.status !== 'connected' && stillOnAuth()) {
       pollAuthorization(account);
     }
   } catch (error) {
