@@ -96,9 +96,16 @@ async function loadSettings() {
 }
 
 function refreshIntervalOptions() {
-  return settingsState.allowed.map((minutes) =>
+  const options = settingsState.allowed.map((minutes) =>
     `<option value="${minutes}" ${minutes === settingsState.intervalMinutes ? 'selected' : ''}>每 ${minutes} 分钟</option>`
-  ).join('');
+  );
+  if (!settingsState.allowed.includes(settingsState.intervalMinutes)) {
+    // 服务端存在不在白名单内的历史值（如手工编辑状态文件）：保留为可见选项。
+    options.push(
+      `<option value="${settingsState.intervalMinutes}" selected>每 ${settingsState.intervalMinutes} 分钟</option>`
+    );
+  }
+  return options.join('');
 }
 
 function syncRefreshIntervalControl() {
@@ -128,6 +135,7 @@ async function applyRefreshInterval(minutes) {
       body: JSON.stringify({ minutes }),
     });
     settingsState.intervalMinutes = Number(payload.refresh_interval_minutes) || minutes;
+    settingsLoadError = '';
     announce(`刷新间隔已设为每 ${minutes} 分钟`);
   } catch (error) {
     announce(`刷新间隔修改失败：${error.message}`);
