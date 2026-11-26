@@ -76,6 +76,8 @@ async function apiFetch(path, options = {}) {
   return payload;
 }
 
+let accountsSnapshot = '';
+
 async function loadAccounts() {
   const firstLoad = !accountsLoaded;
   try {
@@ -87,8 +89,12 @@ async function loadAccounts() {
     accountsError = error.message;
   }
   accountsLoaded = true;
+  // 数据未变化时跳过重渲染：刷新轮询不打断展开的明细与焦点。
+  const snapshot = JSON.stringify([accounts, accountsError]);
+  const changed = snapshot !== accountsSnapshot;
+  accountsSnapshot = snapshot;
   if (route.view === 'overview' || route.view === 'settings') {
-    renderResults();
+    if (changed) renderResults();
   } else if (firstLoad && route.id) {
     // 深链接的账号数据首次到达时渲染；后续刷新由调用方决定，避免渲染循环。
     render();
