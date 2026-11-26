@@ -1,7 +1,7 @@
 """Controllable loopback implementation of the official DeepSeek balance API."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +18,7 @@ class BalanceReply:
 
     balances: list[dict[str, str]] | None
     release: Event = field(default_factory=Event)
+    status: int = 200
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class Request:
     method: str
     path: str
     authorized: bool
+    identity: str | None = field(default=None, kw_only=True)
 
 
 @dataclass
@@ -40,7 +42,11 @@ class DeepSeekSource:
 
 
 @contextmanager
-def serve_deepseek(*replies: BalanceReply) -> Iterator[DeepSeekSource]:
+def serve_deepseek(
+    *replies: BalanceReply,
+    accounts: Mapping[str, tuple[str, BalanceReply]] | None = None,
+) -> Iterator[DeepSeekSource]:
+    """Serve sequential replies or a reusable reply for each configured test key."""
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             self.handle_balance()
@@ -49,7 +55,15 @@ def serve_deepseek(*replies: BalanceReply) -> Iterator[DeepSeekSource]:
             self.handle_balance()
 
         def handle_balance(self) -> None:
-            request = Request(self.command, self.path, self.headers.get("Authorization") == f"Bearer {TEST_KEY}")
+            authorization = self.headers.get("Authorization")
+            account = accounts.get(authorization.removeprefix("Bearer ")) if (
+                accounts is not None and authorization and authorization.startswith("Bearer ")
+            ) else None
+            authorized = (
+                account is not None and account[1].status != 401
+                if accounts is not None else authorization == f"Bearer {TEST_KEY}"
+            )
+            request = Request(self.command, self.path, authorized, identity=account[0] if account else None)
             with source.arrived:
                 index = len(source.requests)
                 source.requests.append(request)
@@ -60,10 +74,16 @@ def serve_deepseek(*replies: BalanceReply) -> Iterator[DeepSeekSource]:
             if not request.authorized:
                 self.send_error(401)
                 return
-            if index >= len(replies):
+            if account is not None:
+                reply = account[1]
+            elif index < len(replies):
+                reply = replies[index]
+            else:
                 self.send_error(429, "Unexpected extra balance request")
                 return
-            reply = replies[index]
+            if reply.status != 200:
+                self.send_error(reply.status)
+                return
             if reply.balances is None:
                 reply.release.wait(30)
                 return
@@ -89,5 +109,8 @@ def serve_deepseek(*replies: BalanceReply) -> Iterator[DeepSeekSource]:
         finally:
             for reply in replies:
                 reply.release.set()
+            if accounts is not None:
+                for _, reply in accounts.values():
+                    reply.release.set()
             server.shutdown()
             thread.join()
