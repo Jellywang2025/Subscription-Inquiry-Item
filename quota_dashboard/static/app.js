@@ -368,7 +368,7 @@ function pollAuthorization(account) {
         stopAuthPolling();
         await loadAccounts();
         const fresh = readAccount();
-        if (fresh) renderAuthorization(fresh, device);
+        renderAuthorization(fresh || account, device);
         return;
       }
       renderAuthorization(account, device);
@@ -530,7 +530,7 @@ async function handleAuthAction(action, trigger) {
     if (device.status === 'connected' && account.connection !== 'connected') {
       await loadAccounts();
       const fresh = readAccount();
-      if (fresh) renderAuthorization(fresh, device);
+      renderAuthorization(fresh || account, device);
     } else {
       renderAuthorization(account, device);
     }

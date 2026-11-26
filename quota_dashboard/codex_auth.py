@@ -153,6 +153,10 @@ class DeviceAuthManager:
                     "client_id": CLIENT_ID,
                 },
             )
+        except DeviceAuthError as error:
+            session.status = "failed"
+            session.error = str(error)
+            return
         except urllib.error.HTTPError as error:
             if error.code == 410:
                 session.status = "expired"

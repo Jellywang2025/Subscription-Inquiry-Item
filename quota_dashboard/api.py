@@ -223,7 +223,7 @@ def _codex_account_or_error(handler: BaseHTTPRequestHandler, account_id: str) ->
     if account is None:
         _send_json(handler, 404, {"status": "error", "error": "找不到这条订阅。"})
         return None
-    if account.get("provider") != "codex":
+    if account.get("provider") not in accounts.DEVICE_PROVIDERS:
         _send_json(handler, 400, {"status": "error", "error": "该账号不使用设备码授权。"})
         return None
     return account
