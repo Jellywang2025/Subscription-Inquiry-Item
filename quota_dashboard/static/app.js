@@ -162,11 +162,17 @@ function money(currency, value) {
   return `${signs[currency] || ''}${value}`;
 }
 
+function resetDisplay(value) {
+  if (!value) return '未提供';
+  const clock = displayClock(value);
+  return clock || h(value);
+}
+
 function quotaMetric(label, value, reset) {
   return `<div class="metric">
     <div class="metric-label">${h(label)}</div><strong>${h(value)}%</strong>
     <div class="progress" role="progressbar" aria-label="${h(label)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${h(value)}"><span style="width:${h(value)}%"></span></div>
-    <small>${h(reset)} 重置</small>
+    <small>${resetDisplay(reset)} 重置</small>
   </div>`;
 }
 
@@ -181,9 +187,9 @@ function card(account) {
     const windows = Array.isArray(account.windows) ? account.windows : [];
     metrics = account.updated
       ? windows.map((window) => quotaMetric(
-        `${h(window.label)}剩余`, window.remaining, window.reset || '未提供'
+        `${window.label}剩余`, window.remaining, window.reset
       )).join('')
-      : '<div class="metric bad"><strong>待授权</strong><small>从配置管理完成连接后查看额度</small></div>';
+      : `<div class="metric bad"><strong>待授权</strong><small>${h(account.error || '从配置管理完成连接后查看额度')}</small></div>`;
     detail = `<div>套餐　${h(account.plan || '未填写')}</div><div>费用　${account.amount ? h(money(account.currency, account.amount) + ' / ' + account.cycle) : '未填写'}</div><div>续费日　${h(account.renewal || '未填写')}</div>`;
   } else {
     const balances = Array.isArray(account.balances) ? account.balances : [];
@@ -336,11 +342,73 @@ function accountLoadError() {
 }
 
 function authorization() {
-  // 设备码授权页随 Codex 连接工单交付；当前视图一律按未找到处理。
-  missingAccount();
+  const account = readAccount();
+  if (!account || account.provider !== 'codex') return missingAccount();
+  renderAuthorization(account, { status: 'idle' });
+  pollAuthorization(account);
+}
+
+let authTimer = null;
+
+function stopAuthPolling() {
+  if (authTimer) { clearInterval(authTimer); authTimer = null; }
+}
+
+function pollAuthorization(account) {
+  stopAuthPolling();
+  const tick = async () => {
+    if (route.view !== 'auth' || route.id !== account.id) { stopAuthPolling(); return; }
+    try {
+      const payload = await apiFetch(`/api/accounts/${encodeURIComponent(account.id)}/device`);
+      if (!authTimer || route.view !== 'auth' || route.id !== account.id) return;
+      const device = payload.device || { status: 'idle' };
+      if (device.status === 'connected' && account.connection !== 'connected') {
+        // 授权刚完成：拉取最新账号数据再渲染（卡片与列表使用新状态）。
+        await loadAccounts();
+        const fresh = readAccount();
+        if (fresh) renderAuthorization(fresh, device);
+        return;
+      }
+      renderAuthorization(account, device);
+    } catch (error) {
+      if (!authTimer || route.view !== 'auth' || route.id !== account.id) return;
+      renderAuthorization(account, { status: 'idle', error: error.message });
+    }
+  };
+  authTimer = setInterval(tick, 1200);
+  tick();
+}
+
+function renderAuthorization(account, device) {
+  const state = device.status || 'idle';
+  const isConnected = state === 'connected' || (state === 'idle' && account.connection === 'connected');
+  let content;
+  if (isConnected) {
+    content = `<div class="feedback" role="status">连接成功 · 这个账号已可刷新额度。</div>
+      <div class="form-actions"><a class="button primary" href="${h(href({ view: 'settings', ...settingsFilters }))}" data-back>返回配置管理</a></div>`;
+  } else if (state === 'expired') {
+    content = `<div class="feedback error" role="status">设备码已过期。请重新获取后继续。</div>
+      <div class="form-actions"><button class="button primary" data-auth="start">重新获取设备码</button></div>`;
+  } else if (state === 'waiting') {
+    content = `<div class="code-box"><div class="code-head"><span class="muted">一次性设备码</span><span class="muted">有效期 15 分钟</span></div>
+      <div class="code-row"><code class="code-value">${h(device.user_code || '')}</code><button class="button" data-auth="copy">复制</button></div></div>
+      <div class="feedback" role="status">等待您在官方页面完成授权</div>
+      <div class="form-actions"><a class="button primary" href="https://auth.openai.com/codex/device" target="_blank" rel="noopener noreferrer">打开 OpenAI 授权页 ↗</a><button class="button" data-auth="check">我已完成授权</button></div>`;
+  } else if (state === 'failed') {
+    content = `<div class="feedback error" role="status">${h(device.error || '授权未完成。')}</div>
+      <div class="form-actions"><button class="button primary" data-auth="start">重新获取设备码</button></div>`;
+  } else {
+    content = `<div class="feedback" role="status">这个账号尚未连接。获取一次性设备码后，在 OpenAI 官方页面完成授权。</div>
+      <div class="form-actions"><button class="button primary" data-auth="start">开始授权</button></div>`;
+  }
+  workspace.innerHTML = backLink() + heading('连接 Codex 账号', account.name)
+    + `<div class="form-layout"><section class="panel"><h2>使用设备码授权</h2><p class="intro">登录 OpenAI 后，输入设备码以连接此账号。</p>${content}</section>
+      <aside class="panel side"><h2>授权步骤</h2><ol class="steps"><li>打开 OpenAI 官方页面。</li><li>登录您想绑定的 Codex 账号并输入设备码。</li><li>返回此页查看连接状态。</li></ol></aside>
+    </div>`;
 }
 
 function render() {
+  stopAuthPolling();
   const active = route.view === 'overview' ? 'overview' : 'settings';
   document.querySelectorAll('nav a').forEach((link) => {
     if (link.dataset.page === active) link.setAttribute('aria-current', 'page');
@@ -426,12 +494,53 @@ document.addEventListener('click', (event) => {
     workspace.querySelector('#search').focus();
   } else if (target.hasAttribute('data-retry')) {
     loadAccounts();
+  } else if (target.dataset.auth) {
+    handleAuthAction(target.dataset.auth, target);
   } else if (target.dataset.remove) {
     showDelete(target.dataset.remove, target);
   } else if (target.id === 'refresh') {
     refreshNow(target);
   }
 });
+
+async function handleAuthAction(action, trigger) {
+  const account = readAccount();
+  if (!account) return;
+  if (action === 'copy') {
+    if (!navigator.clipboard) {
+      announce('请选中设备码复制');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(workspace.querySelector('.code-value')?.textContent || '');
+      trigger.textContent = '已复制';
+    } catch {
+      announce('请选中设备码复制');
+    }
+    return;
+  }
+  trigger.disabled = true;
+  try {
+    const payload = await apiFetch(
+      `/api/accounts/${encodeURIComponent(account.id)}/device/${action}`, { method: 'POST' }
+    );
+    const device = payload.device || { status: 'idle' };
+    if (device.status === 'connected' && account.connection !== 'connected') {
+      await loadAccounts();
+      const fresh = readAccount();
+      if (fresh) renderAuthorization(fresh, device);
+    } else {
+      renderAuthorization(account, device);
+    }
+    if (action === 'check' && device.status !== 'connected') {
+      pollAuthorization(account);
+    }
+  } catch (error) {
+    announce(error.message);
+  } finally {
+    trigger.disabled = false;
+  }
+}
 
 workspace.addEventListener('input', (event) => {
   if (event.target.id === 'search') applyFilters();
@@ -476,13 +585,17 @@ workspace.addEventListener('submit', async (event) => {
 
   submitButton.disabled = true;
   try {
-    await apiFetch(previous ? `/api/accounts/${encodeURIComponent(previous.id)}` : '/api/accounts', {
+    const result = await apiFetch(previous ? `/api/accounts/${encodeURIComponent(previous.id)}` : '/api/accounts', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
     announce('已保存订阅配置');
     await loadAccounts();
-    navigate({ view: 'settings', ...settingsFilters });
+    if (!previous && provider === 'codex' && result.account?.id) {
+      navigate({ view: 'auth', id: result.account.id });
+    } else {
+      navigate({ view: 'settings', ...settingsFilters });
+    }
   } catch (error) {
     feedback.className = 'feedback error';
     feedback.textContent = `保存失败：${error.message}`;

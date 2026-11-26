@@ -7,7 +7,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from typing import Any
 
-from . import accounts, storage
+from . import accounts, codex_auth, storage
 from .sources import codex, deepseek, mimo
 from .sources.http import describe_query_error
 
@@ -18,6 +18,9 @@ __all__ = [
     "serve_account_create",
     "serve_account_update",
     "serve_account_delete",
+    "serve_device_status",
+    "serve_device_start",
+    "serve_device_check",
     "serve_refresh",
     "serve_deepseek_balance",
     "serve_mimo_balance",
@@ -151,7 +154,7 @@ def _read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 
 def serve_account_create(handler: BaseHTTPRequestHandler) -> None:
-    """POST /api/accounts：新增账号（DeepSeek 密钥先验证后保存）。"""
+    """POST /api/accounts：新增账号（密钥平台先验证后保存，Codex 无需密钥）。"""
     try:
         payload = _read_json_body(handler)
         provider = str(payload.get("provider") or "").strip()
@@ -159,9 +162,9 @@ def serve_account_create(handler: BaseHTTPRequestHandler) -> None:
         key = str(payload.get("key") or "").strip()
         if not name:
             raise accounts.AccountError("请填写账号名称。")
-        if not key:
+        if provider not in accounts.DEVICE_PROVIDERS and not key:
             raise accounts.AccountError("请填写密钥。")
-        account = accounts.create_account(provider, name, key)
+        account = accounts.create_account(provider, name, key, _metadata_from(payload))
     except accounts.AccountError as error:
         _send_json(handler, 400, {"status": "error", "error": str(error)})
         return
@@ -169,6 +172,13 @@ def serve_account_create(handler: BaseHTTPRequestHandler) -> None:
         _send_json(handler, 503, STATE_UNAVAILABLE)
         return
     _send_json(handler, 200, {"status": "ok", "account": public_account(account)})
+
+
+def _metadata_from(payload: dict[str, Any]) -> dict[str, str]:
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict):
+        return {field: str(metadata.get(field) or "") for field in accounts.CODEX_METADATA_FIELDS}
+    return {field: str(payload.get(field) or "") for field in accounts.CODEX_METADATA_FIELDS}
 
 
 def serve_account_update(handler: BaseHTTPRequestHandler, account_id: str) -> None:
@@ -179,7 +189,7 @@ def serve_account_update(handler: BaseHTTPRequestHandler, account_id: str) -> No
         key = str(payload.get("key") or "").strip()
         if not name:
             raise accounts.AccountError("请填写账号名称。")
-        account = accounts.update_account(account_id, name, key)
+        account = accounts.update_account(account_id, name, key, _metadata_from(payload))
     except accounts.AccountError as error:
         _send_json(handler, 400, {"status": "error", "error": str(error)})
         return
@@ -192,6 +202,7 @@ def serve_account_update(handler: BaseHTTPRequestHandler, account_id: str) -> No
 def serve_account_delete(handler: BaseHTTPRequestHandler, account_id: str) -> None:
     """DELETE /api/accounts/{id}：删除账号记录、凭据与缓存。"""
     try:
+        codex_auth.MANAGER.stop(account_id)
         removed = accounts.delete_account(account_id)
     except OSError:
         _send_json(handler, 503, STATE_UNAVAILABLE)
@@ -200,6 +211,52 @@ def serve_account_delete(handler: BaseHTTPRequestHandler, account_id: str) -> No
         _send_json(handler, 404, {"status": "error", "error": "找不到这条订阅。"})
         return
     _send_json(handler, 200, {"status": "ok"})
+
+
+def serve_device_status(handler: BaseHTTPRequestHandler, account_id: str) -> None:
+    """GET /api/accounts/{id}/device：当前设备码授权状态。"""
+    account = _find_public_account(account_id)
+    if account is None:
+        _send_json(handler, 404, {"status": "error", "error": "找不到这条订阅。"})
+        return
+    state = codex_auth.MANAGER.status(account_id)
+    if state.get("status") == "connected" and account.get("connection") != "connected":
+        # 登录已失效（如额度查询 401）：旧授权会话不再报告已连接，需重新授权。
+        state = {"status": "idle", "user_code": "", "error": ""}
+    _send_json(handler, 200, {"status": "ok", "device": state})
+
+
+def serve_device_start(handler: BaseHTTPRequestHandler, account_id: str) -> None:
+    """POST /api/accounts/{id}/device/start：发起设备码授权并开始轮询。"""
+    if _find_public_account(account_id) is None:
+        _send_json(handler, 404, {"status": "error", "error": "找不到这条订阅。"})
+        return
+    try:
+        session = codex_auth.MANAGER.start(account_id)
+    except codex_auth.DeviceAuthError as error:
+        _send_json(handler, 400, {"status": "error", "error": str(error)})
+        return
+    _send_json(
+        handler,
+        200,
+        {"status": "ok", "device": {"status": session.status, "user_code": session.user_code}},
+    )
+
+
+def serve_device_check(handler: BaseHTTPRequestHandler, account_id: str) -> None:
+    """POST /api/accounts/{id}/device/check：手动触发一次授权轮询。"""
+    if _find_public_account(account_id) is None:
+        _send_json(handler, 404, {"status": "error", "error": "找不到这条订阅。"})
+        return
+    state = codex_auth.MANAGER.check(account_id)
+    _send_json(handler, 200, {"status": "ok", "device": state})
+
+
+def _find_public_account(account_id: str) -> dict[str, Any] | None:
+    for account in storage.load_accounts():
+        if account.get("id") == account_id:
+            return account
+    return None
 
 
 def serve_refresh(handler: BaseHTTPRequestHandler) -> None:

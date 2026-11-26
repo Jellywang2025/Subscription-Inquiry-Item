@@ -17,8 +17,10 @@ DEFAULT_PORT = 8765
 # 无需登录即可获取的静态资源（登录页也要引用其中的样式）。
 PUBLIC_STATIC_PATHS = frozenset({"/styles.css", "/app.js", "/favicon.ico"})
 
-# 账号级 API 的路径参数：/api/accounts/{id}。
+# 账号级 API 的路径参数：/api/accounts/{id} 与 /api/accounts/{id}/device[/start|check]。
 ACCOUNT_PATH_PATTERN = re.compile(r"^/api/accounts/([A-Za-z0-9_-]+)$")
+DEVICE_PATH_PATTERN = re.compile(r"^/api/accounts/([A-Za-z0-9_-]+)/device$")
+DEVICE_ACTION_PATTERN = re.compile(r"^/api/accounts/([A-Za-z0-9_-]+)/device/(start|check)$")
 
 SESSIONS = auth.SessionStore()
 LOGIN_PAGE = LOGIN_PAGE_PATH.read_text(encoding="utf-8")
@@ -65,6 +67,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path in PUBLIC_STATIC_PATHS:
             super().do_GET()
             return
+        device = DEVICE_PATH_PATTERN.match(path)
+        if device is not None:
+            if not self._has_valid_session():
+                self._redirect_to_login()
+                return
+            api.serve_device_status(self, device.group(1))
+            return
         if not self._has_valid_session():
             self._redirect_to_login()
             return
@@ -78,6 +87,17 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path == "/login":
             self._handle_login()
+            return
+        device_action = DEVICE_ACTION_PATTERN.match(path)
+        if device_action is not None:
+            if not self._has_valid_session():
+                self._redirect_to_login()
+                return
+            account_id, action = device_action.group(1), device_action.group(2)
+            if action == "start":
+                api.serve_device_start(self, account_id)
+            else:
+                api.serve_device_check(self, account_id)
             return
         route = api.POST_ROUTES.get(path)
         if route is not None:

@@ -212,7 +212,7 @@ def test_create_account_rejects_unsupported_provider(
 ) -> None:
     monkeypatch.setenv("QUOTA_STATE_FILE", str(tmp_path / "state.json"))
     with pytest.raises(accounts_module.AccountError, match="尚未开放"):
-        accounts_module.create_account("codex", "任意名", "any-key")
+        accounts_module.create_account("chatgpt", "任意名", "any-key")
     assert storage.load_accounts() == []
 
 
