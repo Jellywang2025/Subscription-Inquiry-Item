@@ -31,6 +31,9 @@ RESET_AT = int((datetime.now(UTC) + timedelta(hours=3)).replace(second=0, micros
 class Attempt:
     number: int
     user_code: str
+    account_id: str = "contract-account"
+    primary_used_percent: int = 25
+    secondary_used_percent: int = 70
 
     @property
     def device_id(self) -> str:
@@ -43,7 +46,7 @@ class Attempt:
 
 FIRST = Attempt(1, "Q7KM-2G4T")
 SECOND = Attempt(2, "H8DR-6V3P")
-THIRD = Attempt(3, "J9WF-5X2N")
+THIRD = Attempt(3, "J9WF-5X2N", primary_used_percent=40)
 ATTEMPTS = (FIRST, SECOND, THIRD)
 
 
@@ -73,14 +76,14 @@ class CodexDeviceSource:
             return self.changed.wait_for(lambda: request in self.requests[after:], timeout=8)
 
 
-def id_token() -> str:
-    claims = {"https://api.openai.com/auth": {"chatgpt_account_id": "contract-account", "chatgpt_plan_type": "pro"}}
+def id_token(account_id: str = "contract-account") -> str:
+    claims = {"https://api.openai.com/auth": {"chatgpt_account_id": account_id, "chatgpt_plan_type": "pro"}}
     payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
     return f"eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.{payload}.c2ln"
 
 
 @contextmanager
-def serve_codex_device() -> Iterator[CodexDeviceSource]:
+def serve_codex_device(attempts: tuple[Attempt, ...] = ATTEMPTS) -> Iterator[CodexDeviceSource]:
     class Handler(BaseHTTPRequestHandler):
         def send_json(self, status: int, payload: dict[str, object]) -> None:
             body = json.dumps(payload).encode()
@@ -114,16 +117,16 @@ def serve_codex_device() -> Iterator[CodexDeviceSource]:
 
         def device_reply(self, payload: Mapping[str, object]) -> tuple[int, dict[str, object]]:
             if self.path == USERCODE_PATH:
-                if not payload.get("client_id") or source.issued >= len(ATTEMPTS):
+                if not payload.get("client_id") or source.issued >= len(attempts):
                     self.record(False)
                     return 400, {"error": "invalid_request"}
-                attempt = ATTEMPTS[source.issued]
+                attempt = attempts[source.issued]
                 source.issued += 1
                 self.record(True, attempt)
                 return 200, {"device_auth_id": attempt.device_id, "user_code": attempt.user_code, "interval": "1"}
 
             if self.path == POLL_PATH:
-                attempt = next((item for item in ATTEMPTS[:source.issued]
+                attempt = next((item for item in attempts[:source.issued]
                                 if payload.get("device_auth_id") == item.device_id
                                 and payload.get("user_code") == item.user_code), None)
                 self.record(attempt is not None, attempt)
@@ -152,7 +155,7 @@ def serve_codex_device() -> Iterator[CodexDeviceSource]:
                 if not valid or attempt is None:
                     return 400, {"error": "invalid_grant"}
                 return 200, {"access_token": attempt.token, "refresh_token": f"contract-refresh-{attempt.number}",
-                             "id_token": id_token(), "token_type": "Bearer", "expires_in": 3600}
+                             "id_token": id_token(attempt.account_id), "token_type": "Bearer", "expires_in": 3600}
 
             self.record(False)
             return 404, {"error": "not_found"}
@@ -170,10 +173,11 @@ def serve_codex_device() -> Iterator[CodexDeviceSource]:
                 self.send_json(401, {"error": "invalid_token"})
             else:
                 self.send_json(200, {"rate_limit": {
-                    "primary_window": {"used_percent": 25 if attempt != THIRD else 40,
+                    "primary_window": {"used_percent": attempt.primary_used_percent,
                                        "limit_window_seconds": 18000, "reset_at": RESET_AT},
-                    "secondary_window": {"used_percent": 70, "limit_window_seconds": 604800,
-                                         "reset_at": None, "reset_after_seconds": None},
+                    "secondary_window": {"used_percent": attempt.secondary_used_percent,
+                                         "limit_window_seconds": 604800, "reset_at": None,
+                                         "reset_after_seconds": None},
                 }, "plan_type": "pro"})
 
         def log_message(self, format: str, *args: object) -> None:
