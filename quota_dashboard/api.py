@@ -289,12 +289,13 @@ def serve_refresh(handler: BaseHTTPRequestHandler) -> None:
 
 def serve_settings(handler: BaseHTTPRequestHandler) -> None:
     """GET /api/settings：可在线调整的服务端设置。"""
-    try:
-        minutes = storage.load_refresh_interval()
-    except OSError:
-        _send_json(handler, 503, STATE_UNAVAILABLE)
-        return
-    _send_json(handler, 200, {"status": "ok", "refresh_interval_minutes": minutes})
+    # load_refresh_interval 对读取失败内部兜底为默认值，不会抛出。
+    minutes = storage.load_refresh_interval()
+    _send_json(
+        handler,
+        200,
+        {"status": "ok", "refresh_interval_minutes": minutes, "allowed_intervals": list(scheduler.ALLOWED_INTERVALS)},
+    )
 
 
 def serve_refresh_interval(handler: BaseHTTPRequestHandler) -> None:

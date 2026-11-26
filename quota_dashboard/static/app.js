@@ -77,30 +77,48 @@ async function apiFetch(path, options = {}) {
 }
 
 let accountsSnapshot = '';
-let settingsState = { intervalMinutes: 15 };
+let settingsState = { intervalMinutes: 15, allowed: [5, 10, 15, 30, 60] };
+let settingsLoadError = '';
 
 async function loadSettings() {
   try {
     const payload = await apiFetch('/api/settings');
     const minutes = Number(payload.refresh_interval_minutes);
     if (minutes > 0) settingsState.intervalMinutes = minutes;
-  } catch { /* 保留当前值 */ }
+    if (Array.isArray(payload.allowed_intervals) && payload.allowed_intervals.length) {
+      settingsState.allowed = payload.allowed_intervals.map(Number).filter(value => value > 0);
+    }
+    settingsLoadError = '';
+  } catch (error) {
+    settingsLoadError = error.message;
+  }
   if (route.view === 'settings') syncRefreshIntervalControl();
 }
 
 function refreshIntervalOptions() {
-  return [5, 10, 15, 30, 60].map((minutes) =>
+  return settingsState.allowed.map((minutes) =>
     `<option value="${minutes}" ${minutes === settingsState.intervalMinutes ? 'selected' : ''}>每 ${minutes} 分钟</option>`
   ).join('');
 }
 
 function syncRefreshIntervalControl() {
-  const select = workspace.querySelector('#refresh-interval');
-  if (select) select.value = String(settingsState.intervalMinutes);
+  const row = workspace.querySelector('[aria-label="后台刷新"]');
+  if (!row) return;
+  const select = row.querySelector('select');
+  if (select) {
+    select.innerHTML = refreshIntervalOptions();
+    select.value = String(settingsState.intervalMinutes);
+  }
+  const note = row.querySelector('#settings-note');
+  if (note) {
+    note.textContent = settingsLoadError
+      ? `设置加载失败：${settingsLoadError}，当前显示可能不是服务端的间隔。`
+      : '';
+  }
 }
 
 async function applyRefreshInterval(minutes) {
-  if (!Number.isInteger(minutes) || ![5, 10, 15, 30, 60].includes(minutes)) {
+  if (!Number.isInteger(minutes) || !settingsState.allowed.includes(minutes)) {
     syncRefreshIntervalControl();
     return;
   }
@@ -340,7 +358,7 @@ function landing() {
   ) + toolbar() + `<div class="board">
     <div id="results"></div>
     ${settings ? `<section class="setting-row" aria-label="后台刷新">
-      <div><h2>后台刷新</h2><p>服务器按此间隔在后台查询全部已连接账号，网页关闭后继续运行。</p></div>
+      <div><h2>后台刷新</h2><p>服务器按此间隔在后台查询全部已连接账号，网页关闭后继续运行。</p><p class="muted" id="settings-note"></p></div>
       <label>刷新间隔<select class="field" id="refresh-interval">${refreshIntervalOptions()}</select></label>
     </section>` : ''}
   </div>`;

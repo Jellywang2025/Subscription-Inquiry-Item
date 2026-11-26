@@ -69,8 +69,10 @@ def start(port: int) -> int:
     from . import scheduler
 
     scheduler.REFRESHER.start()
-    with httpd:
-        open_in_browser(url)
-        httpd.serve_forever()
-    scheduler.REFRESHER.stop()
+    try:
+        with httpd:
+            open_in_browser(url)
+            httpd.serve_forever()
+    finally:
+        scheduler.REFRESHER.stop()
     return 0
