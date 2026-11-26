@@ -2,11 +2,8 @@
 const { createInterface } = require('node:readline');
 
 async function main() {
-  const response = await fetch(`http://127.0.0.1:${process.argv[2]}/json/list`, {
-    signal: AbortSignal.timeout(5000),
-  });
-  if (!response.ok) throw new Error(`Chrome target discovery: HTTP ${response.status}`);
-  const page = (await response.json()).find(target => target.type === 'page');
+  // Chrome writes DevToolsActivePort before its HTTP endpoint is reachable; retry discovery.
+  const page = await discoverPage(10000);
   if (!page) throw new Error('Chrome has no page target');
 
   const ws = new WebSocket(page.webSocketDebuggerUrl);
@@ -40,6 +37,22 @@ async function main() {
     }
   } finally {
     ws.close();
+  }
+}
+
+async function discoverPage(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${process.argv[2]}/json/list`, {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!response.ok) throw new Error(`Chrome target discovery: HTTP ${response.status}`);
+      return (await response.json()).find(target => target.type === 'page') || null;
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
   }
 }
 
