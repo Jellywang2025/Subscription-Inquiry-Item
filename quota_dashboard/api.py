@@ -7,7 +7,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from typing import Any
 
-from . import accounts, codex_auth, storage
+from . import accounts, codex_auth, scheduler, storage
 from .sources import codex, deepseek, mimo
 from .sources.http import describe_query_error
 
@@ -22,6 +22,8 @@ __all__ = [
     "serve_device_start",
     "serve_device_check",
     "serve_refresh",
+    "serve_settings",
+    "serve_refresh_interval",
     "serve_deepseek_balance",
     "serve_mimo_balance",
     "serve_codex_usage",
@@ -285,14 +287,43 @@ def serve_refresh(handler: BaseHTTPRequestHandler) -> None:
     _send_json(handler, 200, {"status": "ok", "refreshed": len(refreshed)})
 
 
+def serve_settings(handler: BaseHTTPRequestHandler) -> None:
+    """GET /api/settings：可在线调整的服务端设置。"""
+    try:
+        minutes = storage.load_refresh_interval()
+    except OSError:
+        _send_json(handler, 503, STATE_UNAVAILABLE)
+        return
+    _send_json(handler, 200, {"status": "ok", "refresh_interval_minutes": minutes})
+
+
+def serve_refresh_interval(handler: BaseHTTPRequestHandler) -> None:
+    """POST /api/settings/refresh-interval：修改后台刷新间隔（分钟）。"""
+    try:
+        payload = _read_json_body(handler)
+        minutes = payload.get("minutes")
+        if not isinstance(minutes, int) or isinstance(minutes, bool) or minutes not in scheduler.ALLOWED_INTERVALS:
+            raise accounts.AccountError("刷新间隔仅支持 5、10、15、30、60 分钟。")
+        storage.save_refresh_interval(minutes)
+    except accounts.AccountError as error:
+        _send_json(handler, 400, {"status": "error", "error": str(error)})
+        return
+    except OSError:
+        _send_json(handler, 503, STATE_UNAVAILABLE)
+        return
+    _send_json(handler, 200, {"status": "ok", "refresh_interval_minutes": minutes})
+
+
 ROUTES: dict[str, Callable[[BaseHTTPRequestHandler], None]] = {
     "/api/sources/deepseek/balance": serve_deepseek_balance,
     "/api/sources/mimo/balance": serve_mimo_balance,
     "/api/sources/codex/balance": serve_codex_usage,
     "/api/accounts": serve_accounts,
+    "/api/settings": serve_settings,
 }
 
 POST_ROUTES: dict[str, Callable[[BaseHTTPRequestHandler], None]] = {
     "/api/accounts": serve_account_create,
     "/api/refresh": serve_refresh,
+    "/api/settings/refresh-interval": serve_refresh_interval,
 }

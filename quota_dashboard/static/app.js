@@ -77,6 +77,46 @@ async function apiFetch(path, options = {}) {
 }
 
 let accountsSnapshot = '';
+let settingsState = { intervalMinutes: 15 };
+
+async function loadSettings() {
+  try {
+    const payload = await apiFetch('/api/settings');
+    const minutes = Number(payload.refresh_interval_minutes);
+    if (minutes > 0) settingsState.intervalMinutes = minutes;
+  } catch { /* 保留当前值 */ }
+  if (route.view === 'settings') syncRefreshIntervalControl();
+}
+
+function refreshIntervalOptions() {
+  return [5, 10, 15, 30, 60].map((minutes) =>
+    `<option value="${minutes}" ${minutes === settingsState.intervalMinutes ? 'selected' : ''}>每 ${minutes} 分钟</option>`
+  ).join('');
+}
+
+function syncRefreshIntervalControl() {
+  const select = workspace.querySelector('#refresh-interval');
+  if (select) select.value = String(settingsState.intervalMinutes);
+}
+
+async function applyRefreshInterval(minutes) {
+  if (!Number.isInteger(minutes) || ![5, 10, 15, 30, 60].includes(minutes)) {
+    syncRefreshIntervalControl();
+    return;
+  }
+  try {
+    const payload = await apiFetch('/api/settings/refresh-interval', {
+      method: 'POST',
+      body: JSON.stringify({ minutes }),
+    });
+    settingsState.intervalMinutes = Number(payload.refresh_interval_minutes) || minutes;
+    announce(`刷新间隔已设为每 ${minutes} 分钟`);
+  } catch (error) {
+    announce(`刷新间隔修改失败：${error.message}`);
+  } finally {
+    syncRefreshIntervalControl();
+  }
+}
 
 async function loadAccounts() {
   const firstLoad = !accountsLoaded;
@@ -299,8 +339,13 @@ function landing() {
     actions
   ) + toolbar() + `<div class="board">
     <div id="results"></div>
+    ${settings ? `<section class="setting-row" aria-label="后台刷新">
+      <div><h2>后台刷新</h2><p>服务器按此间隔在后台查询全部已连接账号，网页关闭后继续运行。</p></div>
+      <label>刷新间隔<select class="field" id="refresh-interval">${refreshIntervalOptions()}</select></label>
+    </section>` : ''}
   </div>`;
   renderResults();
+  if (settings) loadSettings();
 }
 
 function readAccount() {
@@ -590,6 +635,10 @@ workspace.addEventListener('input', (event) => {
 });
 workspace.addEventListener('change', (event) => {
   if (event.target.id === 'platform-filter') applyFilters();
+  if (event.target.id === 'refresh-interval') {
+    applyRefreshInterval(Number(event.target.value));
+    return;
+  }
   const form = event.target.closest('#account-form');
   if (form && event.target.name === 'provider') {
     route.provider = event.target.value;

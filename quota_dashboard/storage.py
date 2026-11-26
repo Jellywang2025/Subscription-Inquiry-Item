@@ -148,3 +148,33 @@ def _write_state(path: Path, state: dict[str, Any]) -> None:
     except OSError:
         temporary.unlink(missing_ok=True)
         raise
+
+
+DEFAULT_REFRESH_INTERVAL_MINUTES = 15
+
+
+def load_refresh_interval() -> int:
+    """后台刷新间隔（分钟）；未配置或损坏时取默认 15。"""
+    try:
+        with _LOCK:
+            settings = _load(state_path()).get("settings")
+    except OSError:
+        return DEFAULT_REFRESH_INTERVAL_MINUTES
+    if not isinstance(settings, dict):
+        return DEFAULT_REFRESH_INTERVAL_MINUTES
+    minutes = settings.get("refresh_interval_minutes")
+    if isinstance(minutes, int) and not isinstance(minutes, bool) and minutes > 0:
+        return minutes
+    return DEFAULT_REFRESH_INTERVAL_MINUTES
+
+
+def save_refresh_interval(minutes: int) -> None:
+    """保存后台刷新间隔（分钟）。"""
+    with _LOCK:
+        state = _load(state_path())
+        settings = state.get("settings")
+        if not isinstance(settings, dict):
+            settings = {}
+        settings["refresh_interval_minutes"] = minutes
+        state["settings"] = settings
+        _write_state(state_path(), state)

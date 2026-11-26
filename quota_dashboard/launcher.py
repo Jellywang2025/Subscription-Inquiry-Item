@@ -52,7 +52,7 @@ def start(port: int) -> int:
     """启动看板。
 
     已有服务在运行时直接打开浏览器，不再启动第二个服务；
-    否则启动本机服务，打开浏览器后持续运行。
+    否则启动本机服务（含后台定时刷新），打开浏览器后持续运行。
     """
     url = dashboard_url(port)
     if is_dashboard_running(port):
@@ -66,7 +66,11 @@ def start(port: int) -> int:
             raise
         open_in_browser(url)
         return 0
+    from . import scheduler
+
+    scheduler.REFRESHER.start()
     with httpd:
         open_in_browser(url)
         httpd.serve_forever()
+    scheduler.REFRESHER.stop()
     return 0
