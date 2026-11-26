@@ -205,7 +205,7 @@ def update_account(
     provider = str(account.get("provider") or "")
     if provider in DEVICE_PROVIDERS:
         for field in CODEX_METADATA_FIELDS:
-            account[field] = str((metadata or {}).get(field, account.get(field, "")) or "")
+            account[field] = str((metadata or {}).get(field, "") or "")
         account["name"] = name
         storage.save_account(account)
         return account

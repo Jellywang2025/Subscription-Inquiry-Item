@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 import urllib.error
 import urllib.request
 from typing import Any
+from urllib.parse import urlencode
 
 from . import storage
-from .sources import codex
 
 # 官方 Codex CLI 的公开客户端标识；授权页与令牌交换均按官方形态携带。
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -35,6 +34,8 @@ class DeviceSession:
         self.status = "waiting"
         self.error = ""
         self.stop = threading.Event()
+        # 手动检查与后台轮询线程共用一把会话锁，避免并发重复轮询或交换。
+        self.lock = threading.Lock()
 
 
 def auth_base_url() -> str:
@@ -46,7 +47,7 @@ def auth_base_url() -> str:
 
 def _post_form(url: str, payload: dict[str, str]) -> dict[str, Any]:
     """按官方 CLI 形态提交表单并解析 JSON 响应。"""
-    data = "&".join(f"{key}={value}" for key, value in payload.items()).encode("utf-8")
+    data = urlencode(payload).encode("utf-8")
     request = urllib.request.Request(url, data=data, method="POST")
     request.add_header("Content-Type", "application/x-www-form-urlencoded")
     request.add_header("Accept", "application/json")
@@ -97,9 +98,11 @@ class DeviceAuthManager:
                 f"{auth_base_url()}{DEVICE_USERCODE_PATH}",
                 {"client_id": CLIENT_ID},
             )
+        except DeviceAuthError:
+            raise
         except urllib.error.HTTPError as error:
             raise DeviceAuthError(f"获取设备码失败（官方接口返回 HTTP {error.code}）。") from error
-        except OSError as error:
+        except (OSError, ValueError) as error:
             raise DeviceAuthError(f"获取设备码失败（{error}）。") from error
         device_auth_id = str(reply.get("device_auth_id") or "")
         user_code = str(reply.get("user_code") or "")
@@ -134,6 +137,11 @@ class DeviceAuthManager:
                 return
 
     def _poll_once(self, account_id: str, session: DeviceSession) -> None:
+        # 会话锁串行化手动检查与后台轮询，避免并发重复轮询或令牌交换。
+        with session.lock:
+            self._poll_locked(account_id, session)
+
+    def _poll_locked(self, account_id: str, session: DeviceSession) -> None:
         if session.status != "waiting":
             return
         try:
@@ -158,6 +166,10 @@ class DeviceAuthManager:
             session.status = "failed"
             session.error = f"连接失败（{error}）"
             return
+        except ValueError as error:
+            session.status = "failed"
+            session.error = f"授权服务响应格式不正确（{error}）。"
+            return
         try:
             self._exchange_and_store(account_id, session, reply)
         except DeviceAuthError as error:
@@ -166,6 +178,9 @@ class DeviceAuthManager:
         except OSError as error:
             session.status = "failed"
             session.error = f"连接失败（{error}）"
+        except ValueError as error:
+            session.status = "failed"
+            session.error = f"授权服务响应格式不正确（{error}）。"
 
     def _exchange_and_store(
         self, account_id: str, session: DeviceSession, approval: dict[str, Any]

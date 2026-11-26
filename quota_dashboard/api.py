@@ -213,11 +213,26 @@ def serve_account_delete(handler: BaseHTTPRequestHandler, account_id: str) -> No
     _send_json(handler, 200, {"status": "ok"})
 
 
-def serve_device_status(handler: BaseHTTPRequestHandler, account_id: str) -> None:
-    """GET /api/accounts/{id}/device：当前设备码授权状态。"""
-    account = _find_public_account(account_id)
+def _codex_account_or_error(handler: BaseHTTPRequestHandler, account_id: str) -> dict[str, Any] | None:
+    """设备码端点的前置校验：账号存在且为 Codex 平台。"""
+    try:
+        account = _find_public_account(account_id)
+    except OSError:
+        _send_json(handler, 503, STATE_UNAVAILABLE)
+        return None
     if account is None:
         _send_json(handler, 404, {"status": "error", "error": "找不到这条订阅。"})
+        return None
+    if account.get("provider") != "codex":
+        _send_json(handler, 400, {"status": "error", "error": "该账号不使用设备码授权。"})
+        return None
+    return account
+
+
+def serve_device_status(handler: BaseHTTPRequestHandler, account_id: str) -> None:
+    """GET /api/accounts/{id}/device：当前设备码授权状态。"""
+    account = _codex_account_or_error(handler, account_id)
+    if account is None:
         return
     state = codex_auth.MANAGER.status(account_id)
     if state.get("status") == "connected" and account.get("connection") != "connected":
@@ -228,8 +243,7 @@ def serve_device_status(handler: BaseHTTPRequestHandler, account_id: str) -> Non
 
 def serve_device_start(handler: BaseHTTPRequestHandler, account_id: str) -> None:
     """POST /api/accounts/{id}/device/start：发起设备码授权并开始轮询。"""
-    if _find_public_account(account_id) is None:
-        _send_json(handler, 404, {"status": "error", "error": "找不到这条订阅。"})
+    if _codex_account_or_error(handler, account_id) is None:
         return
     try:
         session = codex_auth.MANAGER.start(account_id)
@@ -245,8 +259,7 @@ def serve_device_start(handler: BaseHTTPRequestHandler, account_id: str) -> None
 
 def serve_device_check(handler: BaseHTTPRequestHandler, account_id: str) -> None:
     """POST /api/accounts/{id}/device/check：手动触发一次授权轮询。"""
-    if _find_public_account(account_id) is None:
-        _send_json(handler, 404, {"status": "error", "error": "找不到这条订阅。"})
+    if _codex_account_or_error(handler, account_id) is None:
         return
     state = codex_auth.MANAGER.check(account_id)
     _send_json(handler, 200, {"status": "ok", "device": state})

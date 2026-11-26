@@ -77,6 +77,7 @@ async function apiFetch(path, options = {}) {
 }
 
 async function loadAccounts() {
+  const firstLoad = !accountsLoaded;
   try {
     const payload = await apiFetch('/api/accounts');
     accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
@@ -88,8 +89,8 @@ async function loadAccounts() {
   accountsLoaded = true;
   if (route.view === 'overview' || route.view === 'settings') {
     renderResults();
-  } else if (route.id) {
-    // 编辑/授权深链接在账号数据到达前显示占位，数据到位后重渲染一次。
+  } else if (firstLoad && route.id) {
+    // 深链接的账号数据首次到达时渲染；后续刷新由调用方决定，避免渲染循环。
     render();
   }
 }
@@ -363,7 +364,8 @@ function pollAuthorization(account) {
       if (!authTimer || route.view !== 'auth' || route.id !== account.id) return;
       const device = payload.device || { status: 'idle' };
       if (device.status === 'connected' && account.connection !== 'connected') {
-        // 授权刚完成：拉取最新账号数据再渲染（卡片与列表使用新状态）。
+        // 授权刚完成：停止轮询，拉取最新账号数据后渲染一次。
+        stopAuthPolling();
         await loadAccounts();
         const fresh = readAccount();
         if (fresh) renderAuthorization(fresh, device);
