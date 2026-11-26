@@ -480,11 +480,15 @@ async function refreshNow(trigger) {
   const label = trigger.textContent;
   trigger.disabled = true;
   trigger.textContent = '正在刷新…';
+  // 整轮刷新期间并行轮询数据：先完成的账号先在页面上呈现。
+  const poller = setInterval(() => { loadAccounts(); }, 600);
   try {
     await apiFetch('/api/refresh', { method: 'POST' });
+    clearInterval(poller);
     await loadAccounts();
     announce('刷新完成');
   } catch (error) {
+    clearInterval(poller);
     announce(`刷新失败：${error.message}`);
   } finally {
     refreshInFlight = false;
