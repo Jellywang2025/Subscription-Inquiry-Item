@@ -190,7 +190,7 @@ function card(account) {
       metrics = windows.map((window) => quotaMetric(
         `${window.label}剩余`, window.remaining, window.reset
       )).join('');
-    } else if (account.failed) {
+    } else if (account.failed || account.error) {
       metrics = `<div class="metric bad"><strong>暂无可用额度</strong><small>${h(account.error || '查询失败')}</small></div>`;
     } else {
       metrics = '<div class="metric bad"><strong>待授权</strong><small>从配置管理完成连接后查看额度</small></div>';

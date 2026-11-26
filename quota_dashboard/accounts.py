@@ -311,7 +311,7 @@ def refresh_accounts() -> list[dict[str, Any]]:
                 account = future.result()
             except Exception as error:  # noqa: BLE001 - 意外异常按该账号失败处理
                 account["failed"] = True
-                account["error"] = f"查询异常（{error}）"
+                account["error"] = describe_query_error(error)
             # 查询期间账号可能已被删除；原子检查存在才写回，避免复活。
             if storage.save_account_if_present(account):
                 refreshed.append(account)
