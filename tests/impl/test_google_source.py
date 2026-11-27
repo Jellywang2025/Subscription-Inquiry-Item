@@ -74,6 +74,27 @@ def test_parse_authorization_code_accepts_code_url_and_query() -> None:
         google.parse_authorization_code("bad code")
 
 
+def test_parse_authorization_result_returns_state_for_binding() -> None:
+    assert google.parse_authorization_result("abc") == ("abc", None)
+    assert google.parse_authorization_result("http://127.0.0.1:8085/oauth2callback?code=X&state=Y") == ("X", "Y")
+    assert google.parse_authorization_result("?code=Z") == ("Z", None)
+
+
+def test_submit_rejects_state_from_another_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("QUOTA_GOOGLE_CLIENT_ID", "test-client.apps.googleusercontent.com")
+    monkeypatch.setenv("QUOTA_GOOGLE_CLIENT_SECRET", "test-secret")
+    manager = google_auth.GoogleAuthManager()
+    session = manager.start("account-1")
+    other = google_auth.GoogleAuthManager()
+    other_session = other.start("account-1")
+    with pytest.raises(google_auth.GoogleAuthError, match="不匹配"):
+        manager.submit(
+            "account-1",
+            f"http://127.0.0.1:8085/oauth2callback?code=X&state={other_session.state}",
+        )
+    assert session.status == "failed"
+
+
 def test_build_authorization_url_carries_pkce_and_offline_access(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUOTA_GOOGLE_CLIENT_ID", "test-client.apps.googleusercontent.com")
     verifier, challenge = google.generate_pkce_pair()

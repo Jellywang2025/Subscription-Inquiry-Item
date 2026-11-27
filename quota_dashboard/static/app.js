@@ -320,7 +320,8 @@ function card(account) {
       : '<div>暂无余额明细</div>';
   }
   if (account.updated && (account.failed || account.error)) {
-    // Google 的逐项失败已写入各额度段；这里补授权失效等账号级提示。
+    // 账号级失败提示：逐项失败也会同步到账号级字段（与各额度段内的提示
+    // 重复但一致）；授权失效（failed=false、error 非空）只在这里可见。
     const note = account.failed ? `${h(account.error || '刷新失败')} · 显示上次成功数据` : h(account.error || '刷新失败');
     detail += `<div>${note}</div>`;
   }
@@ -590,6 +591,7 @@ function stopGoogleAuthPolling() {
 
 function pollGoogleAuthorization(account) {
   stopGoogleAuthPolling();
+  let rendered = false;
   const tick = async () => {
     if (route.view !== 'auth' || route.id !== account.id) { stopGoogleAuthPolling(); return; }
     try {
@@ -609,9 +611,15 @@ function pollGoogleAuthorization(account) {
       }
       if (reachedSuccess) stopGoogleAuthPolling();
       renderGoogleAuthorization(account, auth);
+      rendered = true;
     } catch (error) {
-      // 瞬态轮询失败不重渲染：保住用户正在输入的授权码与键盘焦点。
+      // 已渲染出表单后瞬态失败保持安静：不打断用户正在输入的授权码。
+      // 首次拉取就失败（尚未渲染）时展示错误，避免停在占位符上无法重试。
       if (!googleAuthTimer || route.view !== 'auth' || route.id !== account.id) return;
+      if (!rendered) {
+        renderGoogleAuthorization(account, { status: 'idle', error: error.message });
+        rendered = true;
+      }
     }
   };
   googleAuthTimer = setInterval(tick, 1200);
@@ -643,7 +651,8 @@ function renderGoogleAuthorization(account, auth) {
     content = `<div class="feedback error" role="status">${h(auth.error || '授权未完成。')}</div>
       <div class="form-actions"><button class="button primary" data-google-auth="start">重新开始授权</button></div>`;
   } else {
-    content = `<div class="feedback" role="status">这个账号尚未连接。开始后，在 Google 官方页面完成授权。</div>
+    content = `${auth.error ? `<div class="feedback error" role="status">${h(auth.error)}</div>` : ''}
+      <div class="feedback" role="status">这个账号尚未连接。开始后，在 Google 官方页面完成授权。</div>
       <div class="form-actions"><button class="button primary" data-google-auth="start">开始授权</button></div>`;
   }
   workspace.innerHTML = backLink() + heading('连接 Google 账号', account.name)

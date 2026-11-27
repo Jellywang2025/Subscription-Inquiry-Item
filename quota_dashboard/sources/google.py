@@ -252,14 +252,13 @@ def write_cli_credentials(account_id: str, token: dict[str, Any]) -> Path | None
 
 
 def remove_cli_credentials(account_id: str) -> None:
-    """删除账号的隔离 HOME（含 CLI 登录凭据）；删除账号时调用。"""
+    """删除账号的隔离 HOME（含 CLI 登录凭据）；删除账号时调用。
+
+    清理失败被吞掉（临时目录下的删除极少失败），不阻塞账号删除流程。
+    """
     if not account_id:
         return
-    home = homes_root() / account_id
-    try:
-        shutil.rmtree(home, ignore_errors=True)
-    except OSError:
-        return
+    shutil.rmtree(homes_root() / account_id, ignore_errors=True)
 
 
 def run_agy(command: str, account_email: str, account_id: str = "", token: dict[str, Any] | None = None) -> dict[str, Any]:

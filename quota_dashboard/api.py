@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler
 from typing import Any
 
 from . import accounts, codex_auth, google_auth, scheduler, storage
-from .sources import codex, deepseek, mimo
+from .sources import codex, deepseek, google, mimo
 from .sources.http import describe_query_error
 
 __all__ = [
@@ -218,6 +218,9 @@ def serve_account_delete(handler: BaseHTTPRequestHandler, account_id: str) -> No
     if not removed:
         _send_json(handler, 404, {"status": "error", "error": "找不到这条订阅。"})
         return
+    # 并发刷新可能在 stop 与删除之间重建该账号的 CLI 凭据目录：
+    # 记录删除后补一次清理，收窄窗口（后续写回会被 save_account_if_present 拒绝）。
+    google.remove_cli_credentials(account_id)
     _send_json(handler, 200, {"status": "ok"})
 
 

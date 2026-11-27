@@ -88,42 +88,39 @@ class GoogleAuthManager:
     def _submit_locked(self, account_id: str, session: GoogleAuthSession, pasted: str) -> dict[str, Any]:
         if session.status == "connected":
             return self.status(account_id)
+
+        def fail(message: str) -> GoogleAuthError:
+            session.status = "failed"
+            session.error = message
+            return GoogleAuthError(message)
+
         try:
             code, returned_state = google.parse_authorization_result(pasted)
-            if returned_state is not None and returned_state != session.state:
-                raise GoogleAuthError("授权结果与当前授权会话不匹配，请重新开始授权。")
+        except google.GoogleAuthError as error:
+            raise fail(str(error)) from error
+        if returned_state is not None and returned_state != session.state:
+            raise fail("授权结果与当前授权会话不匹配，请重新开始授权。")
+        try:
             tokens = google.exchange_code(code, session.verifier)
         except google.GoogleAuthError as error:
-            session.status = "failed"
-            session.error = str(error)
-            raise GoogleAuthError(str(error)) from error
+            raise fail(str(error)) from error
         access_token = str(tokens.get("access_token") or "")
         refresh_token = str(tokens.get("refresh_token") or "")
         if not access_token or not refresh_token:
-            session.status = "failed"
-            session.error = "官方接口未返回有效的访问与刷新令牌。"
-            raise GoogleAuthError(session.error)
+            raise fail("官方接口未返回有效的访问与刷新令牌。")
         try:
             identity = google.fetch_userinfo(access_token)
         except google.GoogleAuthError as error:
-            session.status = "failed"
-            session.error = str(error)
-            raise GoogleAuthError(str(error)) from error
+            raise fail(str(error)) from error
         email = str(identity.get("email") or "").strip()
         if not email:
-            session.status = "failed"
-            session.error = "官方接口未返回账号邮箱，无法核对授权身份。"
-            raise GoogleAuthError(session.error)
+            raise fail("官方接口未返回账号邮箱，无法核对授权身份。")
         try:
             stored = _store_authorization(account_id, tokens, email)
         except OSError as error:
-            session.status = "failed"
-            session.error = f"保存授权结果失败（{error}）。"
-            raise GoogleAuthError(session.error) from error
+            raise fail(f"保存授权结果失败（{error}）。") from error
         if not stored:
-            session.status = "failed"
-            session.error = "找不到这条订阅。"
-            raise GoogleAuthError(session.error)
+            raise fail("找不到这条订阅。")
         session.status = "connected"
         session.error = ""
         return self.status(account_id)
