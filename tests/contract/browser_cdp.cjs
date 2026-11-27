@@ -9,6 +9,10 @@ async function main() {
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   const pending = new Map();
   let id = 0;
+  // CI runner 的 Chrome 在长测试序列中偶发抖动，5 秒会让既有用例随机超时。
+  // 20 秒是折中：慢环境有缓冲；真挂起时最坏也要等满该值才报错（Python 侧
+  // readline 无读超时，这是唯一防线）。
+  const CDP_COMMAND_TIMEOUT_MS = 20000;
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Chrome WebSocket connection timed out')), 5000);
     ws.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
@@ -25,9 +29,7 @@ async function main() {
       const command = JSON.parse(line);
       const commandId = ++id;
       const result = await new Promise(resolve => {
-        // CDP 命令超时：CI runner 的 Chrome 在长测试序列中偶发抖动，
-        // 5 秒会让既有用例随机挂掉；放宽到 20 秒只影响慢环境的等待上限。
-        const timer = setTimeout(() => resolve({ error: `${command.method} timed out` }), 20000);
+        const timer = setTimeout(() => resolve({ error: `${command.method} timed out` }), CDP_COMMAND_TIMEOUT_MS);
         pending.set(commandId, message => {
           clearTimeout(timer);
           resolve(message.error ? { error: message.error.message } : { result: message.result });
