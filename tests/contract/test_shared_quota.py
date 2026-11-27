@@ -18,6 +18,9 @@ from test_codex_windows import (
 )
 from test_deepseek_balance import Browser, poll
 
+# 0.2.0 迁移：共享额度随 Codex 账号授权模型重建，此契约待 04 票按新架构重建。
+pytestmark = pytest.mark.skip(reason="v0.1 共享额度契约待 04 票按 0.2.0 设备码授权架构重建")
+
 
 CHAT_CARD = "ChatGPT 聊天"
 SHARED_LABEL = re.compile(r"ChatGPT\s*与\s*Codex\s*共享")

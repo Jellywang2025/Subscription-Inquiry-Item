@@ -26,6 +26,9 @@ from test_deepseek_balance import (
 )
 from test_mimo_balance import MIMO_KEY, MIMO_PATH, official_balance
 
+# 0.2.0 迁移：Codex 改为网页配置的设备码授权账号，端到端契约待 04 票按新架构重建。
+pytestmark = pytest.mark.skip(reason="v0.1 Codex 端到端契约待 04 票按 0.2.0 设备码授权架构重建")
+
 
 CODEX_TOKEN = "contract-codex-access-token"
 USAGE_BASE_PATH = "/backend-api"

@@ -13,11 +13,11 @@ def dashboard_url(port: int) -> str:
 
 
 def _probe(port: int, timeout: float) -> bytes | None:
-    """向端口发起一次页面请求，返回响应字节；连接失败返回 None。"""
+    """向登录页发起一次请求，返回响应字节；连接失败返回 None。"""
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=timeout) as sock:
             sock.sendall(
-                f"GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n".encode(
+                f"GET /login HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n".encode(
                     "ascii"
                 )
             )
@@ -35,12 +35,12 @@ def _probe(port: int, timeout: float) -> bytes | None:
 
 
 def is_dashboard_running(port: int, timeout: float = 1.0) -> bool:
-    """判断端口上是否已有本看板服务在运行。"""
+    """判断端口上是否已有本订阅管理服务在运行。"""
     response = _probe(port, timeout)
     if response is None:
         return False
     status_line = response.split(b"\r\n", 1)[0]
-    return status_line.endswith(b"200 OK") and "个人订阅额度看板".encode("utf-8") in response
+    return status_line.endswith(b"200 OK") and "订阅管理".encode("utf-8") in response
 
 
 def open_in_browser(url: str) -> bool:
@@ -52,7 +52,7 @@ def start(port: int) -> int:
     """启动看板。
 
     已有服务在运行时直接打开浏览器，不再启动第二个服务；
-    否则启动本机服务，打开浏览器后持续运行。
+    否则启动本机服务（含后台定时刷新），打开浏览器后持续运行。
     """
     url = dashboard_url(port)
     if is_dashboard_running(port):
@@ -66,7 +66,13 @@ def start(port: int) -> int:
             raise
         open_in_browser(url)
         return 0
-    with httpd:
-        open_in_browser(url)
-        httpd.serve_forever()
+    from . import scheduler
+
+    scheduler.REFRESHER.start()
+    try:
+        with httpd:
+            open_in_browser(url)
+            httpd.serve_forever()
+    finally:
+        scheduler.REFRESHER.stop()
     return 0

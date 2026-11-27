@@ -8,10 +8,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.request import ProxyHandler, build_opener
+from urllib.request import ProxyHandler, Request, build_opener
 
 import pytest
-from conftest import free_port, serve_in_thread
+from conftest import admin_password_configured, free_port, login_headers, serve_in_thread
 
 from quota_dashboard.server import create_server
 from quota_dashboard.sources import mimo
@@ -60,10 +60,18 @@ def balance_stub(reply: dict[str, Any]) -> Iterator[tuple[str, list[tuple[str, s
 
 @contextmanager
 def serving_dashboard() -> Iterator[int]:
-    """起一个看板服务，返回端口。"""
-    httpd = create_server(free_port())
-    with httpd, serve_in_thread(httpd):
-        yield int(httpd.server_address[1])
+    """起一个配置了管理员口令的看板服务，返回端口。"""
+    with admin_password_configured():
+        httpd = create_server(free_port())
+        with httpd, serve_in_thread(httpd):
+            yield int(httpd.server_address[1])
+
+
+def api_request(port: int, path: str) -> Request:
+    """带管理员会话的 API 请求。"""
+    return Request(
+        f"http://127.0.0.1:{port}{path}", headers=login_headers(port)
+    )
 
 
 def test_settings_from_env_prefers_injection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -119,7 +127,7 @@ def test_balance_api_returns_official_data_and_available(
         monkeypatch.setenv("QUOTA_MIMO_BASE_URL", base_url)
         monkeypatch.setenv("MIMO_API_KEY", "sk-test")
         with serving_dashboard() as port:
-            with HTTP.open(f"http://127.0.0.1:{port}/api/sources/mimo/balance") as response:
+            with HTTP.open(api_request(port, "/api/sources/mimo/balance")) as response:
                 assert response.status == 200
                 payload: dict[str, Any] = json.loads(response.read().decode("utf-8"))
     assert payload["status"] == "ok"
@@ -144,7 +152,7 @@ def test_balance_api_reports_missing_key_hint(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("MIMO_API_KEY", raising=False)
     with serving_dashboard() as port:
         with pytest.raises(urllib.error.HTTPError) as failure:
-            HTTP.open(f"http://127.0.0.1:{port}/api/sources/mimo/balance")
+            HTTP.open(api_request(port, "/api/sources/mimo/balance"))
     assert failure.value.code == 502
     payload: dict[str, Any] = json.loads(failure.value.read().decode("utf-8"))
     assert payload["status"] == "error"
@@ -157,7 +165,7 @@ def test_balance_api_reports_query_failure(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("MIMO_API_KEY", "sk-test")
     with serving_dashboard() as port:
         with pytest.raises(urllib.error.HTTPError) as failure:
-            HTTP.open(f"http://127.0.0.1:{port}/api/sources/mimo/balance")
+            HTTP.open(api_request(port, "/api/sources/mimo/balance"))
     assert failure.value.code == 502
     payload: dict[str, Any] = json.loads(failure.value.read().decode("utf-8"))
     assert payload["status"] == "error"

@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>订阅管理 0.2.0 · 审图</title>
+  <style>
+    :root { color-scheme: light; font: 16px/1.55 "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif; background: #eef1ed; color: #191b1a; }
+    * { box-sizing: border-box; }
+    body { margin: 0 auto; max-width: 1440px; padding: clamp(18px, 4vw, 58px); }
+    h1, h2, p, figure { margin: 0; }
+    h1 { font-size: clamp(29px, 5vw, 46px); line-height: 1.15; }
+    header p, section p { margin-top: 8px; color: #555e56; }
+    nav { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 9px; }
+    .link { display: inline-block; border-radius: 10px; padding: 9px 13px; border: 1px solid #cdd6cd; text-decoration: none; color: inherit; font-size: 14px; }
+    .primary { background: #191b1a; color: white; border-color: #191b1a; }
+    a:focus-visible { outline: 2px solid #48613a; outline-offset: 3px; }
+    section { margin-top: 24px; padding: clamp(14px, 3vw, 30px); border: 1px solid #d6ddd5; border-radius: 18px; background: #fff; }
+    .scene-header { display: flex; flex-wrap: wrap; gap: 12px; align-items: start; justify-content: space-between; }
+    .pair { display: grid; grid-template-columns: minmax(0,2.65fr) minmax(0,1fr); gap: 16px; margin-top: 17px; align-items: start; }
+    img { display: block; width: 100%; height: auto; border: 1px solid #d6ddd5; border-radius: 9px; }
+    figure a { display: block; }
+    figcaption { margin-top: 7px; font-size: 13px; color: #555e56; }
+    @media (max-width: 600px) { .pair { grid-template-columns: 1fr; } figure:last-child { max-width: 290px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>订阅管理 · 0.2.0 审图</h1>
+    <p>同一份原型、同一批示例账号。点图查看原尺寸，点「打开场景」可以直接操作。</p>
+    <nav aria-label="原型和状态示例">
+      <a class="link primary" href="prototype/index.html">打开交互原型</a>
+      <a class="link" href="prototype/index.html?demo=empty">首次无配置</a>
+      <a class="link" href="prototype/index.html?view=overview&amp;q=无匹配示例">筛选无匹配</a>
+      <a class="link" href="prototype/index.html?demo=failure">查询失败</a>
+      <a class="link" href="prototype/index.html?view=auth&amp;id=codex-work&amp;step=expired">授权过期</a>
+    </nav>
+  </header>
+  <section aria-labelledby="overview">
+    <div class="scene-header"><div><h2 id="overview">订阅总览</h2><p>核对账号区分、额度重置时间、余额与更新时间。</p></div><a class="link" href="prototype/index.html">打开场景</a></div>
+    <div class="pair">
+      <figure>
+        <a href="screens/overview-landscape.png"><img src="screens/overview-landscape.png" width="1920" height="1080" alt="订阅总览横屏原型图"></a>
+        <figcaption>横屏 · 1920 × 1080</figcaption>
+      </figure>
+      <figure>
+        <a href="screens/overview-portrait.png"><img src="screens/overview-portrait.png" width="1080" height="1920" alt="订阅总览竖屏原型图"></a>
+        <figcaption>竖屏 · 1080 × 1920</figcaption>
+      </figure>
+    </div>
+  </section>
+  <section aria-labelledby="settings">
+    <div class="scene-header"><div><h2 id="settings">配置管理</h2><p>核对名称筛选、管理入口、连接状态与密钥末四位。</p></div><a class="link" href="prototype/index.html?view=settings">打开场景</a></div>
+    <div class="pair">
+      <figure>
+        <a href="screens/settings-landscape.png"><img src="screens/settings-landscape.png" width="1920" height="1080" alt="配置管理横屏原型图"></a>
+        <figcaption>横屏 · 1920 × 1080</figcaption>
+      </figure>
+      <figure>
+        <a href="screens/settings-portrait.png"><img src="screens/settings-portrait.png" width="1080" height="1920" alt="配置管理竖屏原型图"></a>
+        <figcaption>竖屏 · 1080 × 1920</figcaption>
+      </figure>
+    </div>
+  </section>
+  <section aria-labelledby="codex">
+    <div class="scene-header"><div><h2 id="codex">Codex 授权</h2><p>核对授权账号、设备码、官方入口与等待状态。</p></div><a class="link" href="prototype/index.html?view=auth&amp;id=codex-work">打开场景</a></div>
+    <div class="pair">
+      <figure>
+        <a href="screens/codex-landscape.png"><img src="screens/codex-landscape.png" width="1920" height="1080" alt="Codex 授权横屏原型图"></a>
+        <figcaption>横屏 · 1920 × 1080</figcaption>
+      </figure>
+      <figure>
+        <a href="screens/codex-portrait.png"><img src="screens/codex-portrait.png" width="1080" height="1920" alt="Codex 授权竖屏原型图"></a>
+        <figcaption>竖屏 · 1080 × 1920</figcaption>
+      </figure>
+    </div>
+  </section>
+  <section aria-labelledby="key">
+    <div class="scene-header"><div><h2 id="key">API 密钥配置</h2><p>核对当前连接、新密钥表单和验证操作。</p></div><a class="link" href="prototype/index.html?view=edit&amp;id=deepseek-work">打开场景</a></div>
+    <div class="pair">
+      <figure>
+        <a href="screens/key-landscape.png"><img src="screens/key-landscape.png" width="1920" height="1080" alt="API 密钥配置横屏原型图"></a>
+        <figcaption>横屏 · 1920 × 1080</figcaption>
+      </figure>
+      <figure>
+        <a href="screens/key-portrait.png"><img src="screens/key-portrait.png" width="1080" height="1920" alt="API 密钥配置竖屏原型图"></a>
+        <figcaption>竖屏 · 1080 × 1920</figcaption>
+      </figure>
+    </div>
+  </section>
+</body>
+</html>

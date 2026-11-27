@@ -2,8 +2,25 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.request
 from typing import Any
+
+
+def describe_query_error(error: Exception) -> str:
+    """把数据源查询异常转换为页面可展示的中文原因。"""
+    if isinstance(error, urllib.error.HTTPError):
+        return f"官方接口返回 HTTP {error.code}"
+    if isinstance(error, urllib.error.URLError):
+        reason = error.reason
+        if isinstance(reason, TimeoutError):
+            return "请求超时"
+        return f"连接失败（{reason}）"
+    if isinstance(error, TimeoutError):
+        return "请求超时"
+    if isinstance(error, PermissionError):
+        return str(error)
+    return f"查询异常（{error}）"
 
 
 def resolve_settings(

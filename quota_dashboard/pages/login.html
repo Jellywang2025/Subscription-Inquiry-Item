@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>订阅管理</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="login-shell">
+    <main class="login-card">
+      <div class="brand login-brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>订阅管理</div>
+      <h1>管理员登录</h1>
+      <p class="login-intro">输入管理员口令，开始管理你的订阅。</p>
+      <form method="post" action="/login" class="login-form">
+        <input type="hidden" name="next" value="{{next}}">
+        <label class="control">管理员口令<input class="field" type="password" name="password" autofocus autocomplete="current-password" required></label>
+        <p class="feedback error" role="alert"{{error_attr}}>{{error}}</p>
+        <div class="form-actions">
+          <button class="button primary" type="submit">登录</button>
+        </div>
+      </form>
+    </main>
+  </div>
+</body>
+</html>

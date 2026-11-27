@@ -9,10 +9,10 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.request import ProxyHandler, build_opener
+from urllib.request import ProxyHandler, Request, build_opener
 
 import pytest
-from conftest import free_port, serve_in_thread
+from conftest import admin_password_configured, free_port, login_headers, serve_in_thread
 
 from quota_dashboard.server import create_server
 from quota_dashboard.sources import codex
@@ -65,9 +65,17 @@ def usage_stub(
 
 @contextmanager
 def serving_dashboard() -> Iterator[int]:
-    httpd = create_server(free_port())
-    with httpd, serve_in_thread(httpd):
-        yield int(httpd.server_address[1])
+    with admin_password_configured():
+        httpd = create_server(free_port())
+        with httpd, serve_in_thread(httpd):
+            yield int(httpd.server_address[1])
+
+
+def api_request(port: int, path: str) -> Request:
+    """带管理员会话的 API 请求。"""
+    return Request(
+        f"http://127.0.0.1:{port}{path}", headers=login_headers(port)
+    )
 
 
 def test_settings_from_env_prefers_injection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -194,7 +202,7 @@ def test_usage_api_returns_official_data(monkeypatch: pytest.MonkeyPatch) -> Non
         monkeypatch.setenv("QUOTA_CODEX_BASE_URL", base_url)
         monkeypatch.setenv("QUOTA_CODEX_ACCESS_TOKEN", "test-token")
         with serving_dashboard() as port:
-            with HTTP.open(f"http://127.0.0.1:{port}/api/sources/codex/balance") as response:
+            with HTTP.open(api_request(port, "/api/sources/codex/balance")) as response:
                 assert response.status == 200
                 payload: dict[str, Any] = json.loads(response.read().decode("utf-8"))
     assert payload["status"] == "ok"
@@ -267,7 +275,7 @@ def test_usage_api_returns_shared_view(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("QUOTA_CODEX_BASE_URL", base_url)
         monkeypatch.setenv("QUOTA_CODEX_ACCESS_TOKEN", "test-token")
         with serving_dashboard() as port:
-            with HTTP.open(f"http://127.0.0.1:{port}/api/sources/codex/balance") as response:
+            with HTTP.open(api_request(port, "/api/sources/codex/balance")) as response:
                 assert response.status == 200
                 payload: dict[str, Any] = json.loads(response.read().decode("utf-8"))
     assert payload["shared"] == {
