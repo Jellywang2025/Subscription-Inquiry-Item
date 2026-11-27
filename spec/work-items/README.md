@@ -14,4 +14,4 @@
 | 08 | 本地持久化与账户隔离 |
 | 09 | 集成与人工复检 |
 
-[产品规格](../archived/personal-quota-dashboard.md)记录公开行为与验收条件。新的协作试点和交付记录见[项目工单](https://github.com/Jellywang2025/Subscription-Inquiry-Item/issues)。
+[产品规格](../archived/personal-quota-dashboard.md)记录公开行为与验收条件。0.2.0 的八张工单与交付回执在[订阅管理工单](../../.scratch/subscription-management/issues/)，真源约定见[工单真源与入口](../../docs/agents/issue-tracker.md)。
