@@ -25,7 +25,9 @@ async function main() {
       const command = JSON.parse(line);
       const commandId = ++id;
       const result = await new Promise(resolve => {
-        const timer = setTimeout(() => resolve({ error: `${command.method} timed out` }), 5000);
+        // CDP 命令超时：CI runner 的 Chrome 在长测试序列中偶发抖动，
+        // 5 秒会让既有用例随机挂掉；放宽到 20 秒只影响慢环境的等待上限。
+        const timer = setTimeout(() => resolve({ error: `${command.method} timed out` }), 20000);
         pending.set(commandId, message => {
           clearTimeout(timer);
           resolve(message.error ? { error: message.error.message } : { result: message.result });
