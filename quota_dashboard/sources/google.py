@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import tempfile
 import urllib.error
@@ -89,7 +90,7 @@ def cli_path() -> str:
 
 def generate_pkce_pair() -> tuple[str, str]:
     """生成 PKCE (verifier, challenge) 对，S256。"""
-    verifier = secrets.token_urlsafe(64)[:128]
+    verifier = secrets.token_urlsafe(64)
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
     challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
     return verifier, challenge
@@ -116,20 +117,31 @@ def build_authorization_url(challenge: str, state: str) -> str:
     return f"{DEFAULT_AUTH_URL}?{urlencode(params)}"
 
 
-def parse_authorization_code(pasted: str) -> str:
-    """解析管理员粘贴的授权结果：接受授权码、回调 URL 或查询串。"""
+def parse_authorization_result(pasted: str) -> tuple[str, str | None]:
+    """解析管理员粘贴的授权结果：返回 (授权码, 回传 state 或 None)。
+
+    接受授权码、回调 URL 或查询串；回调中带回 state 时供会话校验。
+    """
     text = pasted.strip()
     if not text:
         raise GoogleAuthError("请粘贴 Google 返回的授权码。")
     if text.startswith(("http://", "https://", "?")):
         query = urlparse(text).query if not text.startswith("?") else text[1:]
-        code = (parse_qs(query).get("code") or [""])[0]
+        values = parse_qs(query)
+        code = (values.get("code") or [""])[0]
         if code:
-            return code
+            state = (values.get("state") or [""])[0]
+            return code, (state or None)
         raise GoogleAuthError("粘贴的地址中没有授权码（code）。")
     if " " in text or "\n" in text:
         raise GoogleAuthError("授权码不应包含空格或换行。")
-    return text
+    return text, None
+
+
+def parse_authorization_code(pasted: str) -> str:
+    """解析管理员粘贴的授权结果并只返回授权码。"""
+    code, _state = parse_authorization_result(pasted)
+    return code
 
 
 def _post_form(url: str, payload: dict[str, str]) -> dict[str, Any]:
@@ -239,6 +251,17 @@ def write_cli_credentials(account_id: str, token: dict[str, Any]) -> Path | None
     return home
 
 
+def remove_cli_credentials(account_id: str) -> None:
+    """删除账号的隔离 HOME（含 CLI 登录凭据）；删除账号时调用。"""
+    if not account_id:
+        return
+    home = homes_root() / account_id
+    try:
+        shutil.rmtree(home, ignore_errors=True)
+    except OSError:
+        return
+
+
 def run_agy(command: str, account_email: str, account_id: str = "", token: dict[str, Any] | None = None) -> dict[str, Any]:
     """运行官方只读查询并返回其 command.data；失败抛出可展示异常。
 
@@ -252,6 +275,10 @@ def run_agy(command: str, account_email: str, account_id: str = "", token: dict[
     home: Path | None = None
     if account_id and isinstance(token, dict) and token.get("access_token"):
         home = write_cli_credentials(account_id, token)
+        if home is None:
+            # 凭据落盘失败时不得回退到服务器进程的真实 HOME：
+            # 那会把其他登录账号的数据记到当前账号名下。
+            raise GoogleQueryError("无法为该账号准备隔离的 CLI 登录目录。")
     if home is not None:
         # 官方 CLI 的数据目录只随 HOME 移动；SSH 环境下使用文件态令牌存储。
         env["HOME"] = str(home)

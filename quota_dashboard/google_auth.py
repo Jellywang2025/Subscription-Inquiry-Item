@@ -22,13 +22,13 @@ class GoogleAuthError(Exception):
 class GoogleAuthSession:
     """一条订阅记录的进行中授权会话。"""
 
-    def __init__(self, authorization_url: str, verifier: str) -> None:
+    def __init__(self, authorization_url: str, verifier: str, state: str) -> None:
         self.authorization_url = authorization_url
         self.verifier = verifier
+        self.state = state
         # waiting / connected / failed
         self.status = "waiting"
         self.error = ""
-        self.email = ""
         # 手动提交与写回共用一把会话锁，避免并发重复交换。
         self.lock = threading.Lock()
 
@@ -53,9 +53,10 @@ class GoogleAuthManager:
         }
 
     def stop(self, account_id: str) -> None:
-        """丢弃指定账号的进行中会话（删除账号时调用）。"""
+        """丢弃指定账号的进行中会话并清理其磁盘凭据（删除账号时调用）。"""
         with self._lock:
             self._sessions.pop(account_id, None)
+        google.remove_cli_credentials(account_id)
 
     def start(self, account_id: str) -> GoogleAuthSession:
         """为账号发起新的官方授权并生成授权 URL。"""
@@ -68,7 +69,9 @@ class GoogleAuthManager:
             self._sessions.pop(account_id, None)
         verifier, challenge = google.generate_pkce_pair()
         state = secrets.token_urlsafe(16)
-        session = GoogleAuthSession(google.build_authorization_url(challenge, state), verifier)
+        session = GoogleAuthSession(
+            google.build_authorization_url(challenge, state), verifier, state
+        )
         with self._lock:
             self._sessions[account_id] = session
         return session
@@ -86,7 +89,9 @@ class GoogleAuthManager:
         if session.status == "connected":
             return self.status(account_id)
         try:
-            code = google.parse_authorization_code(pasted)
+            code, returned_state = google.parse_authorization_result(pasted)
+            if returned_state is not None and returned_state != session.state:
+                raise GoogleAuthError("授权结果与当前授权会话不匹配，请重新开始授权。")
             tokens = google.exchange_code(code, session.verifier)
         except google.GoogleAuthError as error:
             session.status = "failed"
@@ -109,13 +114,17 @@ class GoogleAuthManager:
             session.status = "failed"
             session.error = "官方接口未返回账号邮箱，无法核对授权身份。"
             raise GoogleAuthError(session.error)
-        stored = _store_authorization(account_id, tokens, email)
+        try:
+            stored = _store_authorization(account_id, tokens, email)
+        except OSError as error:
+            session.status = "failed"
+            session.error = f"保存授权结果失败（{error}）。"
+            raise GoogleAuthError(session.error) from error
         if not stored:
             session.status = "failed"
             session.error = "找不到这条订阅。"
             raise GoogleAuthError(session.error)
         session.status = "connected"
-        session.email = email
         session.error = ""
         return self.status(account_id)
 
@@ -123,7 +132,6 @@ class GoogleAuthManager:
 def _store_authorization(account_id: str, tokens: dict[str, Any], email: str) -> bool:
     """把授权结果写入账号记录并立即查询一次三项额度。"""
     from . import accounts as accounts_module
-    from .sources.google import GoogleAuthExpired
 
     expires_in = tokens.get("expires_in")
     try:
@@ -145,11 +153,9 @@ def _store_authorization(account_id: str, tokens: dict[str, Any], email: str) ->
         account["connection"] = "connected"
         account["failed"] = False
         account["error"] = ""
-        try:
-            accounts_module.refresh_one(account)
-        except GoogleAuthExpired:
-            # 交换成功但查询阶段发现授权立刻失效：保留绑定，交由刷新提示。
-            pass
+        # 授权失效（如刷新令牌被拒）由 refresh_one 写入 connection=expired，
+        # 单项查询失败写入对应项的 failed/error；这里不额外吞异常。
+        accounts_module.refresh_one(account)
         # 查询结果与令牌一并落盘；期间被删除则放弃写回。
         return storage.save_account_if_present(account)
     return False

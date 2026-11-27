@@ -294,9 +294,13 @@ def _google_account_or_error(handler: BaseHTTPRequestHandler, account_id: str) -
 
 def serve_google_auth_status(handler: BaseHTTPRequestHandler, account_id: str) -> None:
     """GET /api/accounts/{id}/google-auth：当前 Google 授权会话状态。"""
-    if _google_account_or_error(handler, account_id) is None:
+    account = _google_account_or_error(handler, account_id)
+    if account is None:
         return
     state = google_auth.MANAGER.status(account_id)
+    if state.get("status") == "connected" and account.get("connection") != "connected":
+        # 登录已失效（如刷新令牌被拒）：旧会话不再报告已连接，需重新授权。
+        state = {"status": "idle", "authorization_url": "", "error": ""}
     _send_json(handler, 200, {"status": "ok", "auth": state})
 
 
@@ -333,7 +337,7 @@ def serve_google_auth_submit(handler: BaseHTTPRequestHandler, account_id: str) -
         if not pasted:
             raise google_auth.GoogleAuthError("请粘贴 Google 返回的授权码。")
         state = google_auth.MANAGER.submit(account_id, pasted)
-    except google_auth.GoogleAuthError as error:
+    except (google_auth.GoogleAuthError, accounts.AccountError) as error:
         _send_json(handler, 400, {"status": "error", "error": str(error)})
         return
     except OSError:

@@ -101,7 +101,7 @@ h1 { font-size: clamp(31px, 3vw, 53px); font-weight: 780; line-height: 1.15; let
 .quota-windows { display: flex; gap: 14px; flex-wrap: wrap; }
 .quota-windows .metric { flex: 1; min-width: min(100%, 120px); }
 .quota-windows .metric strong { font-size: clamp(20px, 2vw, 30px); }
-.code-value.link { font: 650 clamp(14px, 1.6vw, 18px)/1.4 ui-monospace, "Cascadia Mono", monospace; text-decoration: underline; overflow-wrap: anywhere; min-width: 0; }
+.code-value.link { font: 650 clamp(14px, 1.6vw, 18px)/1.4 ui-monospace, "Cascadia Mono", monospace; letter-spacing: normal; text-decoration: underline; overflow-wrap: anywhere; min-width: 0; }
 .dark .metric-label, .dark small, .dark summary, .dark .card-footer { color: #d1d8cd; }
 .progress { height: 4px; border-radius: 10px; background: #dfe5da; margin: 2px 0 7px; overflow: hidden; }
 .progress span { display: block; height: 100%; background: #637a51; }

@@ -319,8 +319,10 @@ function card(account) {
       ? balances.map((balance) => `<div>${h(balance.description || '')}</div>`).join('')
       : '<div>暂无余额明细</div>';
   }
-  if (!isGoogle && account.updated && (account.failed || account.error)) {
-    detail += `<div>${h(account.error || '刷新失败')} · 显示上次成功数据</div>`;
+  if (account.updated && (account.failed || account.error)) {
+    // Google 的逐项失败已写入各额度段；这里补授权失效等账号级提示。
+    const note = account.failed ? `${h(account.error || '刷新失败')} · 显示上次成功数据` : h(account.error || '刷新失败');
+    detail += `<div>${note}</div>`;
   }
   return `<article class="card ${tone}" data-account-id="${h(account.id)}">
     <div class="card-head"><div class="account">${glyph(account)}<h3>${h(account.name)}</h3></div>${status(account)}</div>
@@ -422,8 +424,9 @@ function readAccount() {
   return accounts.find((account) => account.id === route.id);
 }
 
-function metadataFields(account) {
-  return `<label class="control">套餐<input class="field" name="plan" value="${h(account?.plan)}" placeholder="例如 ChatGPT Pro" maxlength="60"></label>
+function metadataFields(account, provider) {
+  const planExample = provider === 'google' ? '例如 Google AI Pro' : '例如 ChatGPT Pro';
+  return `<label class="control">套餐<input class="field" name="plan" value="${h(account?.plan)}" placeholder="${planExample}" maxlength="60"></label>
     <label class="control">费用<input class="field" name="amount" type="number" min="0" step="0.01" value="${h(account?.amount)}" placeholder="0.00"></label>
     <label class="control">币种<select class="field" name="currency"><option value="USD" ${account?.currency === 'USD' ? 'selected' : ''}>USD</option><option value="CNY" ${account?.currency === 'CNY' ? 'selected' : ''}>CNY</option></select></label>
     <label class="control">续费周期<select class="field" name="cycle">${['每月', '每年', '其他'].map((cycle) => `<option ${cycle === account?.cycle ? 'selected' : ''}>${cycle}</option>`).join('')}</select></label>
@@ -442,10 +445,19 @@ function edit(draftName) {
   const usesMetadata = metadataProviders.has(provider);
   const credentialName = providers[provider]?.keyLabel || '';
   const hasKey = Boolean(account?.key_tail) || account?.connection === 'connected';
-  const intro = usesMetadata
-    ? (provider === 'google' ? '保存账号后可进行 Google 官方授权。' : '保存账号后可进入设备码授权。')
-    : (hasKey ? '填写并验证新密钥后，系统会替换当前密钥。' : '填写密钥并验证连接后保存。');
   const title = account ? '编辑订阅' : '添加订阅';
+  let intro;
+  if (provider === 'google') intro = '保存账号后可进行 Google 官方授权。';
+  else if (usesMetadata) intro = '保存账号后可进入设备码授权。';
+  else if (hasKey) intro = '填写并验证新密钥后，系统会替换当前密钥。';
+  else intro = '填写密钥并验证连接后保存。';
+  let submitLabel;
+  if (usesMetadata) submitLabel = account ? '保存修改' : '保存并去授权';
+  else submitLabel = '验证并保存';
+  let connectionMethod;
+  if (provider === 'google') connectionMethod = 'Google 官方授权';
+  else if (usesMetadata) connectionMethod = '官方设备码';
+  else connectionMethod = credentialName;
   workspace.innerHTML = backLink() + heading(title, account ? `${providers[provider]?.name || provider} · ${account.name}` : '选择平台，填写您用于识别账号的名称。')
     + `<div class="form-layout">
       <form class="panel" id="account-form" autocomplete="off">
@@ -454,11 +466,11 @@ function edit(draftName) {
         <div class="form-fields">
           <label class="control">平台<select class="field" name="provider" aria-label="平台" ${account ? 'disabled' : ''}>${platformOptions(provider)}</select></label>
           <label class="control">账号名称<input class="field" name="name" value="${h(draftName ?? account?.name)}" placeholder="自定名称" maxlength="50" required></label>
-          ${usesMetadata ? metadataFields(account) : `<label class="control full">${hasKey ? '新 ' : ''}${credentialName}<input class="field" name="key" type="password" placeholder="${hasKey ? '输入新密钥以替换' : '输入用于查询余额的密钥'}" maxlength="240" ${hasKey ? '' : 'required'}><small>${hasKey ? '留空可保留当前连接。' : '验证并保存后仅显示末四位。'}</small></label>`}
+          ${usesMetadata ? metadataFields(account, provider) : `<label class="control full">${hasKey ? '新 ' : ''}${credentialName}<input class="field" name="key" type="password" placeholder="${hasKey ? '输入新密钥以替换' : '输入用于查询余额的密钥'}" maxlength="240" ${hasKey ? '' : 'required'}><small>${hasKey ? '留空可保留当前连接。' : '验证并保存后仅显示末四位。'}</small></label>`}
         </div>
         <div id="form-feedback" class="feedback" role="status" hidden></div>
         <div class="form-actions">
-          <button class="button primary" type="submit">${usesMetadata ? (account ? '保存修改' : '保存并去授权') : '验证并保存'}</button>
+          <button class="button primary" type="submit">${submitLabel}</button>
           <a class="button" href="${h(href({ view: 'settings', ...settingsFilters }))}" data-back>取消</a>
         </div>
       </form>
@@ -466,7 +478,7 @@ function edit(draftName) {
         <h2>${hasKey ? '当前连接' : '连接方式'}</h2>
         <dl class="specimen"><dt>平台</dt><dd>${h(providers[provider]?.name || provider)}</dd>
           ${hasKey ? `${account?.key_tail ? `<dt>已保存密钥</dt><dd>•••• ${h(account.key_tail)}</dd>` : ''}<dt>连接状态</dt><dd>${status(account)}</dd><dt>更新时间</dt><dd>${showTime(account)}</dd>`
-            : `<dt>连接方式</dt><dd>${provider === 'google' ? 'Google 官方授权' : usesMetadata ? '官方设备码' : credentialName}</dd><dt>连接状态</dt><dd>待连接</dd>`}
+            : `<dt>连接方式</dt><dd>${h(connectionMethod)}</dd><dt>连接状态</dt><dd>待连接</dd>`}
         </dl>
       </aside>
     </div>`;
@@ -584,6 +596,8 @@ function pollGoogleAuthorization(account) {
       const payload = await apiFetch(`/api/accounts/${encodeURIComponent(account.id)}/google-auth`);
       if (!googleAuthTimer || route.view !== 'auth' || route.id !== account.id) return;
       const auth = payload.auth || { status: 'idle' };
+      const reachedSuccess = auth.status === 'connected'
+        || (auth.status === 'idle' && account.connection === 'connected');
       if (auth.status === 'connected' && account.connection !== 'connected') {
         stopGoogleAuthPolling();
         await loadAccounts();
@@ -593,10 +607,11 @@ function pollGoogleAuthorization(account) {
         }
         return;
       }
+      if (reachedSuccess) stopGoogleAuthPolling();
       renderGoogleAuthorization(account, auth);
     } catch (error) {
+      // 瞬态轮询失败不重渲染：保住用户正在输入的授权码与键盘焦点。
       if (!googleAuthTimer || route.view !== 'auth' || route.id !== account.id) return;
-      renderGoogleAuthorization(account, { status: 'idle', error: error.message });
     }
   };
   googleAuthTimer = setInterval(tick, 1200);
@@ -855,8 +870,8 @@ workspace.addEventListener('submit', async (event) => {
       feedback.className = 'feedback error';
       feedback.textContent = error.message;
       feedback.hidden = false;
-      // 服务端已记录失败原因：恢复轮询让页面呈现会话状态。
-      pollGoogleAuthorization(account);
+      // 后台轮询仍在运行：不重启（重启会重置渲染签名并清掉此反馈与
+      // 用户已输入的授权码）；服务端会话状态变化由下一次轮询呈现。
     } finally {
       submitButton.disabled = false;
     }
