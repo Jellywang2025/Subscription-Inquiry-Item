@@ -102,6 +102,15 @@ class Browser:
         self.call("Input.dispatchMouseEvent", type="mouseReleased", button="left", clickCount=1, **point)
         return True
 
+    def click_when_ready(self, label: str, *, timeout: float = 5.0, in_card: bool = False, platform: str = "DeepSeek") -> bool:
+        """等待匹配控件出现后再点击（页面渲染存在异步窗口时使用）。"""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self.click_control(label, in_card=in_card, platform=platform):
+                return True
+            time.sleep(0.2)
+        return False
+
 
 def poll(observe: Callable[[], str], matches: Callable[[str], bool], *, timeout: float = QUERY_TIMEOUT) -> str:
     deadline = time.monotonic() + timeout

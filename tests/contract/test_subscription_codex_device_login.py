@@ -145,7 +145,9 @@ def add_codex(browser: Browser, *, with_payment: bool = True) -> str:
 
 def expect_device(browser: Browser, source: CodexDeviceSource, attempt: Attempt, *, start: bool = False) -> None:
     if start:
-        browser.click_control(r"^(?:开始授权|获取设备码|生成设备码|开始连接)$")
+        assert browser.click_when_ready(r"^(?:开始授权|获取设备码|生成设备码|开始连接)$"), (
+            "授权操作按钮应出现并可点击"
+        )
     assert source.received(Request("POST", USERCODE_PATH, True, identity=attempt.user_code)), (
         f"服务端应请求设备码 {attempt.user_code}，实得上游请求 {source.snapshot()!r}，页面 {visible_main(browser)!r}"
     )
@@ -177,7 +179,7 @@ def copy_code(browser: Browser, origin: str, attempt: Attempt) -> None:
 
 def finish_authorization(browser: Browser, source: CodexDeviceSource, attempt: Attempt) -> None:
     source.resolve(attempt, "approved")
-    browser.click_control(r"^(?:我已完成授权|检查授权状态)$")
+    assert browser.click_when_ready(r"^(?:我已完成授权|检查授权状态)$"), "完成授权按钮应出现并可点击"
     assert source.received(Request("POST", EXCHANGE_PATH, True, identity=attempt.user_code)), (
         f"收到轮询成功后服务端应交换令牌，实得 {source.snapshot()!r}"
     )
