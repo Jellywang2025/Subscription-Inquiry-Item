@@ -6,6 +6,7 @@ import threading
 import urllib.error
 import urllib.request
 from typing import Any
+from urllib.parse import urlencode
 
 from . import storage
 
@@ -13,6 +14,8 @@ from . import storage
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 # 对齐官方 CLI 的请求标识：Cloudflare 会拒绝默认的 Python-urllib UA（HTTP 530）。
 CLIENT_USER_AGENT = "codex_cli_rs/0.171.0"
+# 官方设备码流程的固定回调地址；令牌交换时必须携带同值。
+DEVICE_REDIRECT_URI = "https://auth.openai.com/deviceauth/callback"
 DEVICE_USERCODE_PATH = "/api/accounts/deviceauth/usercode"
 DEVICE_POLL_PATH = "/api/accounts/deviceauth/token"
 DEVICE_EXCHANGE_PATH = "/oauth/token"
@@ -47,10 +50,24 @@ def auth_base_url() -> str:
 
 
 def _post_json(url: str, payload: dict[str, str]) -> dict[str, Any]:
-    """按官方 CLI 形态提交 JSON 并解析响应（设备码签发、轮询与令牌交换）。"""
+    """按官方 CLI 形态提交 JSON 并解析响应（设备码签发与轮询）。"""
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(url, data=data, method="POST")
     request.add_header("Content-Type", "application/json")
+    request.add_header("Accept", "application/json")
+    request.add_header("User-Agent", CLIENT_USER_AGENT)
+    with urllib.request.urlopen(request, timeout=15) as response:
+        body: Any = json.loads(response.read().decode("utf-8"))
+    if not isinstance(body, dict):
+        raise DeviceAuthError("授权服务响应格式不正确。")
+    return body
+
+
+def _post_form(url: str, payload: dict[str, str]) -> dict[str, Any]:
+    """按 OAuth 标准提交表单并解析响应（令牌交换）。"""
+    data = urlencode(payload).encode("utf-8")
+    request = urllib.request.Request(url, data=data, method="POST")
+    request.add_header("Content-Type", "application/x-www-form-urlencoded")
     request.add_header("Accept", "application/json")
     request.add_header("User-Agent", CLIENT_USER_AGENT)
     with urllib.request.urlopen(request, timeout=15) as response:
@@ -147,12 +164,12 @@ class DeviceAuthManager:
         if session.status != "waiting":
             return
         try:
+            # 官方协议：轮询只携带设备码标识与用户码；403/404 表示等待中。
             reply = _post_json(
                 f"{auth_base_url()}{DEVICE_POLL_PATH}",
                 {
                     "device_auth_id": session.device_auth_id,
                     "user_code": session.user_code,
-                    "client_id": CLIENT_ID,
                 },
             )
         except DeviceAuthError as error:
@@ -198,13 +215,15 @@ class DeviceAuthManager:
         verifier = str(approval.get("code_verifier") or "")
         if not code or not verifier:
             raise DeviceAuthError("官方接口未返回有效的授权码。")
-        tokens = _post_json(
+        tokens = _post_form(
             f"{auth_base_url()}{DEVICE_EXCHANGE_PATH}",
             {
                 "grant_type": "authorization_code",
                 "code": code,
                 "code_verifier": verifier,
                 "client_id": CLIENT_ID,
+                # 官方 CLI 的设备码流程固定回调地址，交换时必须原样携带。
+                "redirect_uri": DEVICE_REDIRECT_URI,
             },
         )
         access_token = str(tokens.get("access_token") or "")
