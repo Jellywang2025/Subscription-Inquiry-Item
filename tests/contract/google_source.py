@@ -1,4 +1,4 @@
-"""01 票的可控 Google OAuth 和 Antigravity 进程边界。
+"""Google 契约测试的可控 OAuth 和 Antigravity 进程边界。
 
 QUOTA_GOOGLE_CLIENT_ID / QUOTA_GOOGLE_CLIENT_SECRET 提供测试 OAuth 客户端。
 QUOTA_GOOGLE_TOKEN_URL / QUOTA_GOOGLE_USERINFO_URL 覆盖两个服务端端点；
@@ -34,7 +34,7 @@ CODE = "contract-google-01-approval"
 ACCESS_TOKEN = "contract-google-01-access"
 RESET_SHORT = "2031-02-17T04:23:00Z"
 RESET_WEEK = "2031-02-22T13:47:00Z"
-USAGE = {
+USAGE: dict[str, object] = {
     "plan_name": "Google AI Pro",
     "groups": [
         {
@@ -52,7 +52,11 @@ USAGE = {
         },
     ],
 }
-CREDITS = {"remaining_credits": 1347}
+CREDITS: dict[str, object] = {"remaining_credits": 1347}
+
+
+def cli_replies_path(log: Path) -> Path:
+    return log.with_name("agy-replies.json")
 
 
 @dataclass
@@ -126,6 +130,15 @@ class GoogleSource:
             return []
         return [tuple(json.loads(line)) for line in self.cli_log.read_text(encoding="utf-8").splitlines()]
 
+    def set_cli_replies(
+        self, *, usage: dict[str, object] | str = USAGE, credits: dict[str, object] | str = CREDITS,
+    ) -> None:
+        """配置下一轮回执。空字典表示空 data，字符串表示非零退出时的 stderr。"""
+        path = cli_replies_path(self.cli_log)
+        pending = path.with_suffix(".pending")
+        pending.write_text(json.dumps({"/usage": usage, "/credits": credits}), encoding="utf-8")
+        pending.replace(path)
+
 
 def write_cli(directory: Path, log: Path) -> Path:
     module = Path(__file__).resolve()
@@ -147,8 +160,15 @@ def respond_to_cli(log: Path, args: list[str]) -> int:
     if identity != EMAIL:
         print("未找到与该授权身份匹配的测试 CLI 连接", file=sys.stderr)
         return 1
-    for command, data in (("/usage", USAGE), ("/credits", CREDITS)):
+    replies = cli_replies_path(log)
+    payloads = json.loads(replies.read_text(encoding="utf-8")) if replies.exists() else {
+        "/usage": USAGE, "/credits": CREDITS,
+    }
+    for command, data in payloads.items():
         if args == ["-p", command, "--output-format", "json"]:
+            if isinstance(data, str):
+                print(data, file=sys.stderr)
+                return 1
             print(json.dumps({"command": {"data": data}}))
             return 0
     return 2
