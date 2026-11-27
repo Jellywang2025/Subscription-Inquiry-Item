@@ -440,7 +440,13 @@ function accountLoadError() {
 function authorization() {
   const account = readAccount();
   if (!account || account.provider !== 'codex') return missingAccount();
-  renderAuthorization(account, { status: 'idle' });
+  // 服务端可能有进行中的授权会话：先显示检查中，首次轮询结果到达后才渲染操作，
+  // 避免刷新后的短暂窗口内误点「开始授权」把进行中的设备码顶掉。
+  workspace.innerHTML = heading(
+    '连接 Codex 账号',
+    `${account.name} · 按官方流程授权后即可查询额度。`,
+    `<a class="button" href="${h(href({ view: 'settings', ...settingsFilters }))}" data-back>←　返回配置</a>`
+  ) + '<section class="panel auth"><div class="auth-status"><p>正在检查授权状态…</p></div></section>';
   pollAuthorization(account);
 }
 
