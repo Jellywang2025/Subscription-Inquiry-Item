@@ -6,7 +6,6 @@ import threading
 import urllib.error
 import urllib.request
 from typing import Any
-from urllib.parse import urlencode
 
 from . import storage
 
@@ -48,24 +47,10 @@ def auth_base_url() -> str:
 
 
 def _post_json(url: str, payload: dict[str, str]) -> dict[str, Any]:
-    """按官方 CLI 形态提交 JSON 并解析响应（设备码签发与轮询）。"""
+    """按官方 CLI 形态提交 JSON 并解析响应（设备码签发、轮询与令牌交换）。"""
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(url, data=data, method="POST")
     request.add_header("Content-Type", "application/json")
-    request.add_header("Accept", "application/json")
-    request.add_header("User-Agent", CLIENT_USER_AGENT)
-    with urllib.request.urlopen(request, timeout=15) as response:
-        body: Any = json.loads(response.read().decode("utf-8"))
-    if not isinstance(body, dict):
-        raise DeviceAuthError("授权服务响应格式不正确。")
-    return body
-
-
-def _post_form(url: str, payload: dict[str, str]) -> dict[str, Any]:
-    """按 OAuth 标准提交表单并解析响应（令牌交换）。"""
-    data = urlencode(payload).encode("utf-8")
-    request = urllib.request.Request(url, data=data, method="POST")
-    request.add_header("Content-Type", "application/x-www-form-urlencoded")
     request.add_header("Accept", "application/json")
     request.add_header("User-Agent", CLIENT_USER_AGENT)
     with urllib.request.urlopen(request, timeout=15) as response:
@@ -196,6 +181,9 @@ class DeviceAuthManager:
         except DeviceAuthError as error:
             session.status = "failed"
             session.error = str(error)
+        except urllib.error.HTTPError as error:
+            session.status = "failed"
+            session.error = f"令牌交换失败（官方接口返回 HTTP {error.code}：{_error_body(error)}）"
         except OSError as error:
             session.status = "failed"
             session.error = f"连接失败（{error}）"
@@ -210,7 +198,7 @@ class DeviceAuthManager:
         verifier = str(approval.get("code_verifier") or "")
         if not code or not verifier:
             raise DeviceAuthError("官方接口未返回有效的授权码。")
-        tokens = _post_form(
+        tokens = _post_json(
             f"{auth_base_url()}{DEVICE_EXCHANGE_PATH}",
             {
                 "grant_type": "authorization_code",
@@ -225,6 +213,14 @@ class DeviceAuthManager:
         _store_token(account_id, access_token)
         session.status = "connected"
         session.stop.set()
+
+
+def _error_body(error: urllib.error.HTTPError) -> str:
+    """读取上游错误响应体，便于呈现真实的失败原因。"""
+    try:
+        return error.read().decode("utf-8", "replace")[:200]
+    except OSError:
+        return "无响应详情"
 
 
 def _store_token(account_id: str, access_token: str) -> None:
