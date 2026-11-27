@@ -1,5 +1,13 @@
-# GitHub 工单
+# 工单真源与入口
 
-项目在 [GitHub Issues](https://github.com/Jellywang2025/Subscription-Inquiry-Item/issues) 管理新工单。Codex 根据已确认 Spec 拆票，维护验收编号、交付行为、范围和依赖。记录仓库中 Spec 文件、版本、提交及实际验证入口。DSH 核对技术依赖并从前置验收通过后的就绪票开始。分诊使用[项目标签](triage-labels.md)。
+项目工单以仓库内的 `.scratch/<版本>/issues/*.md` 为真源：一个版本一个目录，一张票一个文件，随分支提交，PR 用相对路径引用，评审时代码与工单同屏可见。Codex 根据已确认 Spec 拆票，维护验收编号、交付行为、范围和依赖，并在票头记录 Spec 文件、版本与提交。DSH 核对技术依赖并从前置验收通过后的就绪票开始。票头 `初始状态` 的取值见[分诊标签](triage-labels.md)。
 
-一份 Spec 的子 Issue 共用一个 PR。子 Issue 留下实现 SHA 与红灯、自测、OCR、独立验收摘要。票验收通过时标记已验收待合入，PR 正文为每张暂未关闭的子 Issue 写 Closes #编号。PR 合入 main 时关闭全部关联票。公开历史摘要见[已交付记录](../../spec/work-items/README.md)。
+原始验收记录、运行日志和截图留本机；公开仓库只保留脱敏后的命令结果、公开 SHA 和证据摘要。
+
+## GitHub Issues 的用途
+
+仓库 Issues 只承载不属于某个 Spec 的跨版本事项和外部反馈，例如协作入口、测试临时目录这类基础设施票。功能票不再在 Issues 建对应条目，避免同一张票两处维护。
+
+## 与 PR 的关系
+
+一份 Spec 的子票共用一个 PR。每张票在 `## 交付回执` 记录实现 SHA、红灯基线、自测、OCR 与独立验收结论；验收通过后把票头状态改为已验收待合入，依赖它的票可以继续。整份 PR 通过必需检查后合入 main，PR 正文列出各票结论与最终候选 SHA，合入后把各票头状态更新为已合入。公开历史摘要见[已交付记录](../../spec/work-items/README.md)。

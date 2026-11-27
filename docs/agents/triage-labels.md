@@ -8,4 +8,4 @@
 | `ready-for-human` | 需要老板或维护者作决定或完成保留给人的操作 |
 | `wontfix` | 已决定暂不处理，在工单中记录原因 |
 
-标签沿用 [Matt Pocock 技能的默认分诊角色](../../.agents/skills/setup-matt-pocock-skills/triage-labels.md)。DSH 同步 GitHub 工单状态。
+标签沿用 [Matt Pocock 技能的默认分诊角色](../../.agents/skills/setup-matt-pocock-skills/triage-labels.md)。本地工单把当前状态写在票头 `初始状态` 字段，DSH 按需改为已验收待合入、已合入等后续状态；GitHub Issues 上的票沿用同名标签。
