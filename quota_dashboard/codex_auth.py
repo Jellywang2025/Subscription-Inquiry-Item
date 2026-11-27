@@ -12,6 +12,8 @@ from . import storage
 
 # 官方 Codex CLI 的公开客户端标识；授权页与令牌交换均按官方形态携带。
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+# 对齐官方 CLI 的请求标识：Cloudflare 会拒绝默认的 Python-urllib UA（HTTP 530）。
+CLIENT_USER_AGENT = "codex_cli_rs/0.171.0"
 DEVICE_USERCODE_PATH = "/api/accounts/deviceauth/usercode"
 DEVICE_POLL_PATH = "/api/accounts/deviceauth/token"
 DEVICE_EXCHANGE_PATH = "/oauth/token"
@@ -45,12 +47,27 @@ def auth_base_url() -> str:
     return _env_base_url("QUOTA_CODEX_AUTH_BASE_URL", DEFAULT_AUTH_BASE_URL)
 
 
+def _post_json(url: str, payload: dict[str, str]) -> dict[str, Any]:
+    """按官方 CLI 形态提交 JSON 并解析响应（设备码签发与轮询）。"""
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(url, data=data, method="POST")
+    request.add_header("Content-Type", "application/json")
+    request.add_header("Accept", "application/json")
+    request.add_header("User-Agent", CLIENT_USER_AGENT)
+    with urllib.request.urlopen(request, timeout=15) as response:
+        body: Any = json.loads(response.read().decode("utf-8"))
+    if not isinstance(body, dict):
+        raise DeviceAuthError("授权服务响应格式不正确。")
+    return body
+
+
 def _post_form(url: str, payload: dict[str, str]) -> dict[str, Any]:
-    """按官方 CLI 形态提交表单并解析 JSON 响应。"""
+    """按 OAuth 标准提交表单并解析响应（令牌交换）。"""
     data = urlencode(payload).encode("utf-8")
     request = urllib.request.Request(url, data=data, method="POST")
     request.add_header("Content-Type", "application/x-www-form-urlencoded")
     request.add_header("Accept", "application/json")
+    request.add_header("User-Agent", CLIENT_USER_AGENT)
     with urllib.request.urlopen(request, timeout=15) as response:
         body: Any = json.loads(response.read().decode("utf-8"))
     if not isinstance(body, dict):
@@ -94,7 +111,7 @@ class DeviceAuthManager:
             previous = self._sessions.get(account_id)
             _stop_session(previous)
         try:
-            reply = _post_form(
+            reply = _post_json(
                 f"{auth_base_url()}{DEVICE_USERCODE_PATH}",
                 {"client_id": CLIENT_ID},
             )
@@ -145,7 +162,7 @@ class DeviceAuthManager:
         if session.status != "waiting":
             return
         try:
-            reply = _post_form(
+            reply = _post_json(
                 f"{auth_base_url()}{DEVICE_POLL_PATH}",
                 {
                     "device_auth_id": session.device_auth_id,
