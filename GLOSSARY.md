@@ -1,6 +1,6 @@
 # 个人订阅额度
 
-在同一个看板查看个人使用的 ChatGPT 聊天、Codex、DeepSeek API 和小米 MiMo API 还剩多少可用量。平台提供重置时间时一并显示。
+个人订阅管理 `0.3.0` 涵盖 Codex、DeepSeek API、小米 MiMo API 和 Google AI（Google One）。管理员按账号查看可用额度或余额，平台提供重置时间时一并查看。
 
 ## 业务术语
 
@@ -23,6 +23,18 @@ DeepSeek API 账户中可用于支付调用费用的余额。
 **MiMo 账户余额**
 
 MiMo SK 充值账户中可用于支付 API 调用费用的余额。
+
+**Gemini Apps 用量窗口**
+
+Google 对个人账号在 Gemini 应用中的使用量设置的时段，包括五小时窗口和每周窗口。可用量与重置时间以该账号在 Gemini 中看到的信息为准。
+
+**Antigravity 模型组额度**
+
+一个账号在 Antigravity 中可供同组模型共同使用的额度。组内任一模型的使用都可能减少该组的剩余额度。
+
+**Google One AI 积分余额**
+
+账号当前可在 Google 支持的产品中使用的 AI 积分，以积分计量。开启家庭共享时，余额可能包含家庭成员共同使用的积分。
 
 **可用余额**
 
