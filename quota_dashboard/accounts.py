@@ -4,12 +4,13 @@ from __future__ import annotations
 import os
 import urllib.error
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any
 
 from . import storage
-from .sources import codex, deepseek, mimo
+from .sources import codex, deepseek, google, mimo
 from .sources.http import describe_query_error
 
 CURRENCY_SIGNS = {"CNY": "¥", "USD": "$"}
@@ -17,7 +18,12 @@ CURRENCY_SIGNS = {"CNY": "¥", "USD": "$"}
 KEY_PROVIDERS = frozenset({"deepseek", "mimo"})
 # 以设备码授权连接的平台。
 DEVICE_PROVIDERS = frozenset({"codex"})
-CODEX_METADATA_FIELDS = ("plan", "amount", "currency", "cycle", "renewal")
+# 以 Google 官方 OAuth 授权连接的平台（授权码粘贴 + 身份核对）。
+GOOGLE_PROVIDERS = frozenset({"google"})
+# 支持套餐、费用、币种、续费周期与下次续费日的平台。
+METADATA_FIELDS = ("plan", "amount", "currency", "cycle", "renewal")
+# 兼容旧名：Codex 与 Google AI 共用同一组付费字段。
+CODEX_METADATA_FIELDS = METADATA_FIELDS
 
 
 class AccountError(Exception):
@@ -157,8 +163,125 @@ def _find_account(account_id: str) -> dict[str, Any] | None:
     return None
 
 
+def google_initial_items() -> dict[str, Any]:
+    """Google 卡三项额度的初始状态：Gemini Apps 实号核实前仅提供官方指引。"""
+    return {
+        "gemini_apps": {"status": "manual", "updated": "", "failed": False, "error": ""},
+        "antigravity": {"status": "empty", "updated": "", "failed": False, "error": ""},
+        "credits": {"status": "empty", "updated": "", "failed": False, "error": ""},
+    }
+
+
+def _refresh_google_item(
+    items: dict[str, Any],
+    key: str,
+    query: Callable[[], Any],
+) -> dict[str, Any]:
+    """刷新 Google 卡的一个额度项：失败保留旧值与原成功时间，成功更新并记录时间。"""
+    previous = items.get(key)
+    previous = dict(previous) if isinstance(previous, dict) else {}
+    try:
+        payload = query()
+    except Exception as error:  # noqa: BLE001 - 单项失败不影响其他项
+        previous.update({"status": "failed", "failed": True, "error": describe_query_error(error)})
+        return previous
+    entry = dict(previous)
+    entry.update({"status": "ok", "failed": False, "error": "", "updated": _timestamp()})
+    entry.update(payload)
+    return entry
+
+
+def _ensure_google_access_token(account: dict[str, Any]) -> dict[str, Any]:
+    """Google 访问令牌过期时用刷新令牌换新；官方拒绝时标记需重新授权。"""
+    token = account.get("google_token")
+    if not isinstance(token, dict) or not token:
+        return account
+    expiry = str(token.get("expiry") or "")
+    if expiry:
+        try:
+            from datetime import datetime
+
+            if datetime.now().astimezone() < datetime.fromisoformat(expiry):
+                return account
+        except ValueError:
+            pass  # 损坏的时间按过期处理
+    refresh_token = str(token.get("refresh_token") or "")
+    if not refresh_token:
+        account["connection"] = "expired"
+        account["error"] = "授权已失效，请重新授权。"
+        return account
+    try:
+        tokens = google.refresh_access_token(refresh_token)
+    except google.GoogleAuthExpired:
+        account["connection"] = "expired"
+        account["error"] = "授权已失效，请重新授权。"
+        return account
+    except google.GoogleAuthError as error:
+        # 刷新暂时失败：保留连接，本轮流为查询失败。
+        account["failed"] = True
+        account["error"] = str(error)
+        return account
+    expires_in = tokens.get("expires_in")
+    try:
+        lifetime = int(expires_in) if expires_in is not None else 3600
+    except (TypeError, ValueError):
+        lifetime = 3600
+    from datetime import datetime, timedelta
+
+    account["google_token"] = {
+        "access_token": str(tokens.get("access_token") or token.get("access_token") or ""),
+        "refresh_token": str(tokens.get("refresh_token") or refresh_token),
+        "expiry": (datetime.now() + timedelta(seconds=max(60, lifetime))).astimezone().isoformat(timespec="seconds"),
+    }
+    return account
+
+
+def _refresh_google_account(account: dict[str, Any]) -> dict[str, Any]:
+    """逐项刷新 Google 账号的三项额度（Gemini Apps 保持官方指引态）。"""
+    token = account.get("google_token")
+    email = str(account.get("google_email") or "")
+    if not isinstance(token, dict) or not token or not email:
+        return account
+    items = dict(account.get("google_items") or {})
+    if not items:
+        items = google_initial_items()
+    account_id = str(account.get("id") or "")
+
+    def query_usage() -> dict[str, Any]:
+        data = google.run_agy(google.USAGE_COMMAND, email, account_id, token)
+        groups = google.usage_groups(data)
+        if not groups:
+            raise ValueError("官方回执没有可展示的模型组")
+        return {"groups": groups}
+
+    def query_credits() -> dict[str, Any]:
+        data = google.run_agy(google.CREDITS_COMMAND, email, account_id, token)
+        value = google.credits_value(data)
+        if value is None:
+            raise ValueError("官方回执没有积分数据")
+        return {"value": value}
+
+    items["antigravity"] = _refresh_google_item(items, "antigravity", query_usage)
+    items["credits"] = _refresh_google_item(items, "credits", query_credits)
+    gemini_apps = dict(items.get("gemini_apps") or {})
+    gemini_apps.setdefault("status", "manual")
+    items["gemini_apps"] = gemini_apps
+    account["google_items"] = items
+
+    # 账号级状态：任一项刷新失败时提示，但保留已成功项的最新数据。
+    failures = [items[key].get("error") for key in ("antigravity", "credits") if items[key].get("failed")]
+    account["failed"] = bool(failures)
+    account["error"] = str(failures[0]) if failures else ""
+    latest = max(
+        (str(items[key].get("updated") or "") for key in ("antigravity", "credits")),
+        default="",
+    )
+    account["updated"] = latest or account.get("updated") or ""
+    return account
+
+
 def create_account(provider: str, name: str, key: str, metadata: dict[str, str] | None = None) -> dict[str, Any]:
-    """新增一个平台账号；密钥平台先验证再保存，Codex 无需密钥。"""
+    """新增一个平台账号；密钥平台先验证再保存，授权平台无需密钥。"""
     if provider in DEVICE_PROVIDERS:
         account: dict[str, Any] = {
             "id": uuid.uuid4().hex,
@@ -170,7 +293,24 @@ def create_account(provider: str, name: str, key: str, metadata: dict[str, str] 
             "error": "",
             "windows": [],
         }
-        for field in CODEX_METADATA_FIELDS:
+        for field in METADATA_FIELDS:
+            account[field] = str((metadata or {}).get(field, "") or "")
+        storage.save_account(account)
+        return account
+    if provider in GOOGLE_PROVIDERS:
+        account = {
+            "id": uuid.uuid4().hex,
+            "provider": provider,
+            "name": name,
+            "connection": "pending",
+            "updated": "",
+            "failed": False,
+            "error": "",
+            "google_email": "",
+            "google_token": {},
+            "google_items": google_initial_items(),
+        }
+        for field in METADATA_FIELDS:
             account[field] = str((metadata or {}).get(field, "") or "")
         storage.save_account(account)
         return account
@@ -204,8 +344,8 @@ def update_account(
     if account is None:
         raise AccountError("找不到这条订阅。")
     provider = str(account.get("provider") or "")
-    if provider in DEVICE_PROVIDERS:
-        for field in CODEX_METADATA_FIELDS:
+    if provider in DEVICE_PROVIDERS or provider in GOOGLE_PROVIDERS:
+        for field in METADATA_FIELDS:
             account[field] = str((metadata or {}).get(field, "") or "")
         account["name"] = name
         storage.save_account(account)
@@ -242,6 +382,14 @@ def delete_account(account_id: str) -> bool:
 def refresh_one(account: dict[str, Any]) -> dict[str, Any]:
     """查询单个已连接账号并就地更新；返回更新后的记录。"""
     provider = str(account.get("provider") or "")
+    if provider in GOOGLE_PROVIDERS:
+        token = account.get("google_token")
+        if not isinstance(token, dict) or not token:
+            return account
+        account = _ensure_google_access_token(account)
+        if account.get("connection") == "expired":
+            return account
+        return _refresh_google_account(account)
     if provider in DEVICE_PROVIDERS:
         token = account.get("token")
         if not token:
@@ -297,7 +445,8 @@ def refresh_accounts() -> list[dict[str, Any]]:
     connected = [
         account
         for account in storage.load_accounts()
-        if account.get("connection") == "connected" and (account.get("key") or account.get("token"))
+        if account.get("connection") == "connected"
+        and (account.get("key") or account.get("token") or account.get("google_token"))
     ]
     if not connected:
         return []

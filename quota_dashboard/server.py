@@ -21,6 +21,8 @@ PUBLIC_STATIC_PATHS = frozenset({"/styles.css", "/app.js", "/favicon.ico"})
 ACCOUNT_PATH_PATTERN = re.compile(r"^/api/accounts/([A-Za-z0-9_-]+)$")
 DEVICE_PATH_PATTERN = re.compile(r"^/api/accounts/([A-Za-z0-9_-]+)/device$")
 DEVICE_ACTION_PATTERN = re.compile(r"^/api/accounts/([A-Za-z0-9_-]+)/device/(start|check)$")
+GOOGLE_AUTH_PATH_PATTERN = re.compile(r"^/api/accounts/([A-Za-z0-9_-]+)/google-auth$")
+GOOGLE_AUTH_ACTION_PATTERN = re.compile(r"^/api/accounts/([A-Za-z0-9_-]+)/google-auth/(start|submit)$")
 
 SESSIONS = auth.SessionStore()
 LOGIN_PAGE = LOGIN_PAGE_PATH.read_text(encoding="utf-8")
@@ -74,6 +76,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 return
             api.serve_device_status(self, device.group(1))
             return
+        google_auth = GOOGLE_AUTH_PATH_PATTERN.match(path)
+        if google_auth is not None:
+            if not self._has_valid_session():
+                self._redirect_to_login()
+                return
+            api.serve_google_auth_status(self, google_auth.group(1))
+            return
         if not self._has_valid_session():
             self._redirect_to_login()
             return
@@ -98,6 +107,17 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 api.serve_device_start(self, account_id)
             else:
                 api.serve_device_check(self, account_id)
+            return
+        google_action = GOOGLE_AUTH_ACTION_PATTERN.match(path)
+        if google_action is not None:
+            if not self._has_valid_session():
+                self._redirect_to_login()
+                return
+            account_id, action = google_action.group(1), google_action.group(2)
+            if action == "start":
+                api.serve_google_auth_start(self, account_id)
+            else:
+                api.serve_google_auth_submit(self, account_id)
             return
         route = api.POST_ROUTES.get(path)
         if route is not None:

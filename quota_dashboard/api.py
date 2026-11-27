@@ -7,7 +7,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from typing import Any
 
-from . import accounts, codex_auth, scheduler, storage
+from . import accounts, codex_auth, google_auth, scheduler, storage
 from .sources import codex, deepseek, mimo
 from .sources.http import describe_query_error
 
@@ -21,6 +21,9 @@ __all__ = [
     "serve_device_status",
     "serve_device_start",
     "serve_device_check",
+    "serve_google_auth_status",
+    "serve_google_auth_start",
+    "serve_google_auth_submit",
     "serve_refresh",
     "serve_settings",
     "serve_refresh_interval",
@@ -48,6 +51,8 @@ ACCOUNT_PUBLIC_FIELDS = (
     "windows",
     "balances",
     "details",
+    "google_email",
+    "google_items",
 )
 
 
@@ -164,7 +169,7 @@ def serve_account_create(handler: BaseHTTPRequestHandler) -> None:
         key = str(payload.get("key") or "").strip()
         if not name:
             raise accounts.AccountError("请填写账号名称。")
-        if provider not in accounts.DEVICE_PROVIDERS and not key:
+        if provider not in accounts.DEVICE_PROVIDERS and provider not in accounts.GOOGLE_PROVIDERS and not key:
             raise accounts.AccountError("请填写密钥。")
         account = accounts.create_account(provider, name, key, _metadata_from(payload))
     except accounts.AccountError as error:
@@ -205,6 +210,7 @@ def serve_account_delete(handler: BaseHTTPRequestHandler, account_id: str) -> No
     """DELETE /api/accounts/{id}：删除账号记录、凭据与缓存。"""
     try:
         codex_auth.MANAGER.stop(account_id)
+        google_auth.MANAGER.stop(account_id)
         removed = accounts.delete_account(account_id)
     except OSError:
         _send_json(handler, 503, STATE_UNAVAILABLE)
@@ -268,6 +274,72 @@ def serve_device_check(handler: BaseHTTPRequestHandler, account_id: str) -> None
         return
     state = codex_auth.MANAGER.check(account_id)
     _send_json(handler, 200, {"status": "ok", "device": state})
+
+
+def _google_account_or_error(handler: BaseHTTPRequestHandler, account_id: str) -> dict[str, Any] | None:
+    """Google 授权端点的前置校验：账号存在且为 Google AI 平台。"""
+    try:
+        account = _find_public_account(account_id)
+    except OSError:
+        _send_json(handler, 503, STATE_UNAVAILABLE)
+        return None
+    if account is None:
+        _send_json(handler, 404, {"status": "error", "error": "找不到这条订阅。"})
+        return None
+    if account.get("provider") not in accounts.GOOGLE_PROVIDERS:
+        _send_json(handler, 400, {"status": "error", "error": "该账号不使用 Google 授权。"})
+        return None
+    return account
+
+
+def serve_google_auth_status(handler: BaseHTTPRequestHandler, account_id: str) -> None:
+    """GET /api/accounts/{id}/google-auth：当前 Google 授权会话状态。"""
+    if _google_account_or_error(handler, account_id) is None:
+        return
+    state = google_auth.MANAGER.status(account_id)
+    _send_json(handler, 200, {"status": "ok", "auth": state})
+
+
+def serve_google_auth_start(handler: BaseHTTPRequestHandler, account_id: str) -> None:
+    """POST /api/accounts/{id}/google-auth/start：发起 Google 官方授权。"""
+    if _google_account_or_error(handler, account_id) is None:
+        return
+    try:
+        session = google_auth.MANAGER.start(account_id)
+    except google_auth.GoogleAuthError as error:
+        _send_json(handler, 400, {"status": "error", "error": str(error)})
+        return
+    _send_json(
+        handler,
+        200,
+        {
+            "status": "ok",
+            "auth": {
+                "status": session.status,
+                "authorization_url": session.authorization_url,
+                "error": "",
+            },
+        },
+    )
+
+
+def serve_google_auth_submit(handler: BaseHTTPRequestHandler, account_id: str) -> None:
+    """POST /api/accounts/{id}/google-auth/submit：提交授权码完成连接。"""
+    if _google_account_or_error(handler, account_id) is None:
+        return
+    try:
+        payload = _read_json_body(handler)
+        pasted = str(payload.get("code") or "").strip()
+        if not pasted:
+            raise google_auth.GoogleAuthError("请粘贴 Google 返回的授权码。")
+        state = google_auth.MANAGER.submit(account_id, pasted)
+    except google_auth.GoogleAuthError as error:
+        _send_json(handler, 400, {"status": "error", "error": str(error)})
+        return
+    except OSError:
+        _send_json(handler, 503, STATE_UNAVAILABLE)
+        return
+    _send_json(handler, 200, {"status": "ok", "auth": state})
 
 
 def _find_public_account(account_id: str) -> dict[str, Any] | None:

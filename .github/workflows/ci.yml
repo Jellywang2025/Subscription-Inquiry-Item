@@ -43,6 +43,8 @@ jobs:
       QUOTA_CODEX_BASE_URL: http://127.0.0.1:1
       QUOTA_DEEPSEEK_BASE_URL: http://127.0.0.1:1
       QUOTA_MIMO_BASE_URL: http://127.0.0.1:1
+      QUOTA_GOOGLE_TOKEN_URL: http://127.0.0.1:1
+      QUOTA_GOOGLE_USERINFO_URL: http://127.0.0.1:1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
