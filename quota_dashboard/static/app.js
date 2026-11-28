@@ -260,6 +260,11 @@ function googleItemTime(item) {
   return clock ? `<small>${item.failed ? '上次成功' : '已更新'} ${clock}</small>` : '';
 }
 
+function googleItemFailure(item) {
+  if (!item || !item.failed) return '';
+  return `<small class="issue">${h(item.error || '刷新失败')} · 显示上次成功数据</small>`;
+}
+
 function googleCardSections(account) {
   const items = account.google_items || {};
   const geminiApps = `<div class="metric manual">
@@ -271,14 +276,15 @@ function googleCardSections(account) {
   const usageBody = groups.length
     ? groups.map((group) => `<div class="quota-group"><b class="metric-label">${h(group.name)}</b><div class="quota-windows">${(group.windows || []).map((window) => quotaMetric(
       `${window.label}剩余`, window.remaining, window.reset
-    )).join('')}</div></div>`).join('')
+    )).join('')}</div></div>`).join('') + googleItemFailure(usage)
     : `<strong class="metric-value">暂无可用额度</strong><small>${h(usage.error || '等待首次查询')}</small>`;
   const antigravity = `<div class="metric antigravity">
     <div class="metric-label">Antigravity</div>${usageBody}${googleItemTime(usage)}
   </div>`;
   const credits = items.credits || {};
-  const creditsBody = credits.updated || credits.value !== undefined
-    ? `<strong>${h(credits.value ?? '…')}<span class="unit">积分</span></strong>`
+  const hasCreditsValue = credits.updated || credits.value !== undefined;
+  const creditsBody = hasCreditsValue
+    ? `<strong>${h(credits.value ?? '…')}<span class="unit">积分</span></strong>${googleItemFailure(credits)}`
     : `<strong class="metric-value">暂无可用结果</strong><small>${h(credits.error || '等待首次查询')}</small>`;
   const creditCard = `<div class="metric credits">
     <div class="metric-label">Google One AI 积分</div>${creditsBody}
