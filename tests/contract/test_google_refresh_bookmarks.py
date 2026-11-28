@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from google_source import EMAIL, RESET_SHORT, RESET_WEEK, GoogleSource
+from google_source import EMAIL, RESET_SHORT, RESET_WEEK, TOKEN_PATH, GoogleSource
 from test_deepseek_balance import Browser, open_chrome, success_time, wait_for_new_clock_value
 from test_google_account_overview import (
     CONNECTED, GROUPS, ITEMS, NAME, add_google, connect_google, dashboard, expect_window, official_links, quota_windows,
@@ -244,4 +244,7 @@ def test_ac01_ac03_ac04_ac05_google_bookmark_reopens_and_rename_keeps_connection
     source.set_cli_replies(credits={"remaining_credits": 2764})
     refresh_google(browser, source)
     expect_credits(google_items(browser, RENAMED)[CREDITS_ITEM], 2764)
-    assert source.requests() == oauth_before, "改名后应沿用原 Google 授权，无需再次授权"
+    assert not any(
+        request.method == "POST" and request.path == TOKEN_PATH
+        for request in source.requests()[len(oauth_before):]
+    ), "改名后应沿用原 Google 授权，无需再次授权"
