@@ -648,7 +648,7 @@ function renderGoogleAuthorization(account, auth) {
   let content;
   if (isConnected) {
     content = `<div class="feedback" role="status">连接成功 · 这个账号已可刷新额度。</div>
-      <div class="form-actions"><a class="button primary" href="${h(href({ view: 'settings', ...settingsFilters }))}" data-back>返回配置管理</a></div>`;
+      <div class="form-actions"><button class="button" data-google-auth="start">重新开始授权</button><a class="button primary" href="${h(href({ view: 'settings', ...settingsFilters }))}" data-back>返回配置管理</a></div>`;
   } else if (state === 'waiting') {
     content = `<div class="code-box"><div class="code-head"><span class="muted">Google 官方授权</span><span class="muted">在浏览器完成登录</span></div>
       <div class="code-row"><a class="code-value link" href="${h(auth.authorization_url || '')}" target="_blank" rel="noopener noreferrer">打开 Google 授权页 ↗</a><button class="button" data-google-auth="copy">复制链接</button></div></div>

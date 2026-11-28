@@ -237,10 +237,30 @@ def _ensure_google_access_token(account: dict[str, Any]) -> dict[str, Any]:
 
 
 def _refresh_google_account(account: dict[str, Any]) -> dict[str, Any]:
-    """逐项刷新 Google 账号的三项额度（Gemini Apps 保持官方指引态）。"""
+    """逐项刷新 Google 账号的三项额度（Gemini Apps 保持官方指引态）。
+
+    取数前先用该账号的令牌核对授权身份：无法核对或与绑定不符时提示
+    原因并保留原有结果，不消费任何回执（防止串号数据写入卡片）。
+    """
     token = account.get("google_token")
     email = str(account.get("google_email") or "")
     if not isinstance(token, dict) or not token or not email:
+        return account
+    access_token = str(token.get("access_token") or "")
+    try:
+        identity = google.fetch_userinfo(access_token)
+    except google.GoogleAuthError as error:
+        account["failed"] = True
+        account["error"] = str(error)
+        return account
+    identity_email = str(identity.get("email") or "").strip()
+    if not identity_email:
+        account["failed"] = True
+        account["error"] = "无法核对授权身份（官方接口未返回账号邮箱），已保留原有结果。"
+        return account
+    if identity_email != email:
+        account["failed"] = True
+        account["error"] = f"回执身份与当前订阅不匹配（{identity_email}），已保留原有结果。"
         return account
     items = dict(account.get("google_items") or {})
     if not items:

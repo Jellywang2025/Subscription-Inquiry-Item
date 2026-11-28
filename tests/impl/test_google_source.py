@@ -167,6 +167,7 @@ def test_google_account_lifecycle_keeps_items_and_connection(
         payload={"command": {"data": {"remaining_credits": 1347, **USAGE}}},
     )
     monkeypatch.setenv("QUOTA_GOOGLE_CLI", str(cli))
+    monkeypatch.setattr(google, "fetch_userinfo", lambda access_token: {"email": "family@example.test"})
     created = accounts.create_account(
         "google", "松云家庭订阅", "", {"plan": "家庭年度套餐", "amount": "149.99", "currency": "USD", "cycle": "每年", "renewal": "2030-10-19"}
     )
@@ -207,3 +208,67 @@ def test_refresh_google_item_keeps_previous_value_on_failure() -> None:
     assert result["status"] == "failed" and result["failed"] is True
     assert result["updated"] == previous["updated"] and result["value"] == previous["value"]
     assert "boom" in result["error"]
+
+
+@pytest.mark.parametrize(
+    ("fault", "reason_fragment"),
+    [
+        ("missing", "无法核对授权身份"),
+        ("mismatch", "不匹配"),
+    ],
+)
+def test_refresh_google_rejects_unverifiable_or_mismatched_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str, reason_fragment: str
+) -> None:
+    class FakeUserinfoSource:
+        def __init__(self, email: str | None) -> None:
+            self.email = email
+
+        def fetch_userinfo(self, access_token: str) -> dict[str, object]:
+            if self.email is None:
+                return {}
+            return {"email": self.email}
+
+    bound = "family@example.test"
+    foreign = "other@example.test"
+    monkeypatch.setattr(google, "fetch_userinfo", FakeUserinfoSource(None if fault == "missing" else foreign).fetch_userinfo)
+    calls: list[tuple[str, list[str]]] = []
+
+    def must_not_run(command: str, account_email: str, *args: object) -> dict[str, object]:
+        calls.append((account_email, [command]))
+        raise AssertionError("身份核对失败时不得执行 CLI 查询")
+
+    monkeypatch.setattr(google, "run_agy", must_not_run)
+    record = {
+        "id": "acct-1",
+        "provider": "google",
+        "connection": "connected",
+        "google_email": bound,
+        "google_token": {"access_token": "a", "refresh_token": "r", "expiry": "2099-01-01T00:00:00+00:00"},
+        "google_items": {
+            "antigravity": {"status": "ok", "updated": "2026-01-01T08:00:00+08:00", "groups": [{"name": "G", "windows": []}], "failed": False, "error": ""},
+            "credits": {"status": "ok", "updated": "2026-01-01T08:00:00+08:00", "value": 5, "failed": False, "error": ""},
+        },
+    }
+    refreshed = accounts.refresh_one(dict(record))
+    assert refreshed["failed"] is True and reason_fragment in refreshed["error"]
+    assert refreshed["google_email"] == bound, "身份异常后保留原绑定"
+    assert refreshed["google_items"] == record["google_items"], "身份异常时逐项结果原样保留"
+    assert calls == []
+
+
+def test_refresh_google_reports_revoked_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    def revoked(access_token: str) -> dict[str, object]:
+        raise google.GoogleAuthError("无法核对 Google 身份（官方接口返回 HTTP 401）。")
+
+    monkeypatch.setattr(google, "fetch_userinfo", revoked)
+    record = {
+        "id": "acct-2",
+        "provider": "google",
+        "connection": "connected",
+        "google_email": "family@example.test",
+        "google_token": {"access_token": "a", "refresh_token": "r", "expiry": "2099-01-01T00:00:00+00:00"},
+        "google_items": {},
+    }
+    refreshed = accounts.refresh_one(dict(record))
+    assert refreshed["failed"] is True and "401" in refreshed["error"]
