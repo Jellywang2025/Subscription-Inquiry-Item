@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import sys
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -32,6 +33,11 @@ CLIENT_ID = "contract-google.apps.googleusercontent.com"
 EMAIL = "google-01-family@example.test"
 CODE = "contract-google-01-approval"
 ACCESS_TOKEN = "contract-google-01-access"
+SECOND_EMAIL = "google-02-personal@example.test"
+CODES = {EMAIL: CODE, SECOND_EMAIL: "contract-google-02-approval"}
+IDS = {EMAIL: "contract-google-01", SECOND_EMAIL: "contract-google-02"}
+ACCESS_TOKENS = {EMAIL: ACCESS_TOKEN, SECOND_EMAIL: "contract-google-02-access"}
+REFRESH_TOKENS = {EMAIL: "contract-google-01-refresh", SECOND_EMAIL: "contract-google-02-refresh"}
 RESET_SHORT = "2031-02-17T04:23:00Z"
 RESET_WEEK = "2031-02-22T13:47:00Z"
 USAGE: dict[str, object] = {
@@ -55,8 +61,14 @@ USAGE: dict[str, object] = {
 CREDITS: dict[str, object] = {"remaining_credits": 1347}
 
 
-def cli_replies_path(log: Path) -> Path:
-    return log.with_name("agy-replies.json")
+def cli_replies_path(log: Path, identity: str) -> Path:
+    filename = "agy-replies.json" if identity == EMAIL else "agy-replies-second.json"
+    return log.with_name(filename)
+
+
+def cli_log_path(log: Path, identity: str) -> Path:
+    # 两个账号的 CLI 可能并行启动，各自写入独立日志。
+    return log.with_name("agy-calls-second.jsonl") if identity == SECOND_EMAIL else log
 
 
 @dataclass
@@ -64,7 +76,10 @@ class GoogleSource:
     origin: str
     cli: Path
     cli_log: Path
-    _approval: tuple[str, str] | None = None
+    _approvals: dict[str, tuple[str, str]] = field(default_factory=dict)
+    _exchanged: set[str] = field(default_factory=set)
+    _revoked: set[str] = field(default_factory=set)
+    _userinfo_overrides: dict[str, str | None] = field(default_factory=dict)
     _requests: list[Request] = field(default_factory=list)
     _lock: Lock = field(default_factory=Lock)
 
@@ -78,7 +93,7 @@ class GoogleSource:
             "QUOTA_GOOGLE_CLI_ACCOUNT": "",
         }
 
-    def approve(self, authorization_url: str) -> str:
+    def approve(self, authorization_url: str, identity: str = EMAIL) -> str:
         """模拟 Google 批准该请求，生成可粘贴回看板的回调 URL。"""
         scheme, host, path, query, _ = urlsplit(authorization_url)
         assert (scheme, host, path) == ("https", "accounts.google.com", "/o/oauth2/v2/auth")
@@ -93,48 +108,85 @@ class GoogleSource:
         assert redirect.scheme == "http" and redirect.hostname in {"127.0.0.1", "localhost", "::1"}
         assert redirect.path == "/oauth2callback" and not redirect.query and not redirect.fragment
         with self._lock:
-            self._approval = (redirect_uri, challenge)
-        values = {"code": CODE}
+            self._approvals[identity] = (redirect_uri, challenge)
+        values = {"code": CODES[identity]}
         if params.get("state"):
             values["state"] = params["state"][0]
         return urlunsplit(redirect._replace(query=urlencode(values)))
 
-    def exchange(self, params: dict[str, list[str]]) -> bool:
+    def exchange(self, params: dict[str, list[str]]) -> str | None:
         verifier, = params.get("code_verifier", [""])
         valid_verifier = re.fullmatch(r"[A-Za-z0-9._~-]{43,128}", verifier)
         digest = hashlib.sha256(verifier.encode()).digest()
         challenge = base64.urlsafe_b64encode(digest).decode().rstrip("=")
         redirect = params.get("redirect_uri", [""])[0]
         with self._lock:
-            valid = (valid_verifier is not None and self._approval == (redirect, challenge)
-                     and params.get("grant_type") == ["authorization_code"]
-                     and params.get("client_id") == [CLIENT_ID] and params.get("code") == [CODE])
-            self._requests.append(Request("POST", TOKEN_PATH, valid, identity=EMAIL if valid else None))
-            if valid:
-                self._approval = None
-        return valid
+            identity = None
+            if params.get("client_id") == [CLIENT_ID]:
+                if params.get("grant_type") == ["authorization_code"] and valid_verifier is not None:
+                    for email, code in CODES.items():
+                        if params.get("code") == [code] and self._approvals.get(email) == (redirect, challenge):
+                            identity = email
+                            self._approvals.pop(email)
+                            self._exchanged.add(email)
+                            self._revoked.discard(email)
+                            break
+                elif params.get("grant_type") == ["refresh_token"]:
+                    identity = next((email for email, token in REFRESH_TOKENS.items()
+                                     if params.get("refresh_token") == [token]
+                                     and email in self._exchanged and email not in self._revoked), None)
+            self._requests.append(Request("POST", TOKEN_PATH, identity is not None, identity=identity))
+            return identity
 
-    def userinfo(self, authorization: str | None) -> bool:
+    def set_userinfo_email(self, identity: str, email: str | None) -> None:
+        """让已签发令牌的身份回执缺少邮箱，或返回另一受控邮箱。"""
         with self._lock:
-            exchanged = Request("POST", TOKEN_PATH, True, identity=EMAIL) in self._requests
-            valid = exchanged and authorization == f"Bearer {ACCESS_TOKEN}"
-            self._requests.append(Request("GET", USERINFO_PATH, valid, identity=EMAIL if valid else None))
-        return valid
+            self._userinfo_overrides[identity] = email
+
+    def revoke(self, identity: str) -> None:
+        """撤销该账号的访问与刷新能力，直到收到新的授权。"""
+        with self._lock:
+            self._revoked.add(identity)
+
+    def userinfo(self, authorization: str | None) -> dict[str, object] | None:
+        with self._lock:
+            identity = next((email for email, token in ACCESS_TOKENS.items()
+                             if authorization == f"Bearer {token}" and email in self._exchanged), None)
+            valid = identity is not None and identity not in self._revoked
+            self._requests.append(Request("GET", USERINFO_PATH, valid, identity=identity))
+            if not valid or identity is None:
+                return None
+            email = self._userinfo_overrides.get(identity, identity)
+            if email is None:
+                return {}
+            return {"id": IDS[email], "email": email, "verified_email": True}
 
     def requests(self) -> tuple[Request, ...]:
         with self._lock:
             return tuple(self._requests)
 
     def cli_calls(self) -> list[tuple[str, list[str]]]:
-        if not self.cli_log.exists():
-            return []
-        return [tuple(json.loads(line)) for line in self.cli_log.read_text(encoding="utf-8").splitlines()]
+        return [(identity, args) for _, identity, args in self.cli_events()]
+
+    def cli_events(self) -> list[tuple[float, str, list[str]]]:
+        events: list[tuple[float, str, list[str]]] = []
+        for identity in CODES:
+            log = cli_log_path(self.cli_log, identity)
+            if log.exists():
+                # 查询可能正在落日志，只读取已写完的行。
+                complete = log.read_text(encoding="utf-8").rpartition("\n")[0]
+                for line in complete.splitlines():
+                    at, account, args = json.loads(line)
+                    events.append((at, account, args))
+        return sorted(events)
 
     def set_cli_replies(
-        self, *, usage: dict[str, object] | str = USAGE, credits: dict[str, object] | str = CREDITS,
+        self, *, identity: str = EMAIL, usage: dict[str, object] | str = USAGE,
+        credits: dict[str, object] | str = CREDITS,
     ) -> None:
         """配置下一轮回执。空字典表示空 data，字符串表示非零退出时的 stderr。"""
-        path = cli_replies_path(self.cli_log)
+        assert identity in CODES
+        path = cli_replies_path(self.cli_log, identity)
         pending = path.with_suffix(".pending")
         pending.write_text(json.dumps({"/usage": usage, "/credits": credits}), encoding="utf-8")
         pending.replace(path)
@@ -155,12 +207,12 @@ def write_cli(directory: Path, log: Path) -> Path:
 
 def respond_to_cli(log: Path, args: list[str]) -> int:
     identity = os.environ.get("QUOTA_GOOGLE_CLI_ACCOUNT", "")
-    with log.open("a", encoding="utf-8") as evidence:
-        evidence.write(json.dumps([identity, args]) + "\n")
-    if identity != EMAIL:
+    with cli_log_path(log, identity).open("a", encoding="utf-8") as evidence:
+        evidence.write(json.dumps([time.monotonic(), identity, args]) + "\n")
+    if identity not in CODES:
         print("未找到与该授权身份匹配的测试 CLI 连接", file=sys.stderr)
         return 1
-    replies = cli_replies_path(log)
+    replies = cli_replies_path(log, identity)
     payloads = json.loads(replies.read_text(encoding="utf-8")) if replies.exists() else {
         "/usage": USAGE, "/credits": CREDITS,
     }
@@ -190,11 +242,12 @@ def serve_google(directory: Path) -> Iterator[GoogleSource]:
                 self.send_error(404)
                 return
             raw = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-            if not source.exchange(parse_qs(raw.decode())):
+            identity = source.exchange(parse_qs(raw.decode()))
+            if identity is None:
                 self.send_json(400, {"error": "invalid_grant"})
                 return
             self.send_json(200, {
-                "access_token": ACCESS_TOKEN, "refresh_token": "contract-google-01-refresh",
+                "access_token": ACCESS_TOKENS[identity], "refresh_token": REFRESH_TOKENS[identity],
                 "token_type": "Bearer", "expires_in": 3600,
             })
 
@@ -202,10 +255,11 @@ def serve_google(directory: Path) -> Iterator[GoogleSource]:
             if self.path != USERINFO_PATH:
                 self.send_error(404)
                 return
-            if not source.userinfo(self.headers.get("Authorization")):
+            payload = source.userinfo(self.headers.get("Authorization"))
+            if payload is None:
                 self.send_json(401, {"error": "invalid_token"})
                 return
-            self.send_json(200, {"id": "contract-google-01", "email": EMAIL, "verified_email": True})
+            self.send_json(200, payload)
 
         def log_message(self, format: str, *args: object) -> None:
             pass
