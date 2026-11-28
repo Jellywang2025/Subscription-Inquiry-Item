@@ -93,6 +93,8 @@ h1 { font-size: clamp(31px, 3vw, 53px); font-weight: 780; line-height: 1.15; let
 .metric strong .unit { font: 650 0.45em/1 "Inter","Segoe UI",sans-serif; letter-spacing: -.02em; margin-left: 4px; }
 .metric.bad strong { font-size: 25px; letter-spacing: -.025em; }
 .metric small { font-size: 11px; }
+.metric small.issue { color: var(--danger); }
+.dark .metric small.issue { color: #ffbea6; }
 .metric.manual strong { font-size: clamp(18px, 1.9vw, 25px); letter-spacing: -.03em; }
 .metric.antigravity { flex: 1.6; min-width: min(100%, 210px); }
 .metric .metric-value { font-size: clamp(18px, 1.9vw, 25px); }

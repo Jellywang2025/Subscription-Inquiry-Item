@@ -260,9 +260,13 @@ function googleItemTime(item) {
   return clock ? `<small>${item.failed ? '上次成功' : '已更新'} ${clock}</small>` : '';
 }
 
+function failureNote(message) {
+  return `${h(message || '刷新失败')} · 显示上次成功数据`;
+}
+
 function googleItemFailure(item) {
   if (!item || !item.failed) return '';
-  return `<small class="issue">${h(item.error || '刷新失败')} · 显示上次成功数据</small>`;
+  return `<small class="issue">${failureNote(item.error)}</small>`;
 }
 
 function googleCardSections(account) {
@@ -328,7 +332,7 @@ function card(account) {
   if (account.updated && (account.failed || account.error)) {
     // 账号级失败提示：逐项失败也会同步到账号级字段（与各额度段内的提示
     // 重复但一致）；授权失效（failed=false、error 非空）只在这里可见。
-    const note = account.failed ? `${h(account.error || '刷新失败')} · 显示上次成功数据` : h(account.error || '刷新失败');
+    const note = account.failed ? failureNote(account.error) : h(account.error || '刷新失败');
     detail += `<div>${note}</div>`;
   }
   return `<article class="card ${tone}" data-account-id="${h(account.id)}">
