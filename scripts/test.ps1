@@ -217,11 +217,15 @@ try {
     $env:QUOTA_CODEX_BASE_URL = 'http://127.0.0.1:1'
     $env:QUOTA_DEEPSEEK_BASE_URL = 'http://127.0.0.1:1'
     $env:QUOTA_MIMO_BASE_URL = 'http://127.0.0.1:1'
+    $env:QUOTA_GOOGLE_TOKEN_URL = 'http://127.0.0.1:1'
+    $env:QUOTA_GOOGLE_USERINFO_URL = 'http://127.0.0.1:1'
+    # 未注入替身时指向不存在的可执行文件，避免 PATH 上的真实 agy 被误触发。
+    $env:QUOTA_GOOGLE_CLI = Join-Path $runDir 'agy-not-installed'
     $env:PYTHONDONTWRITEBYTECODE = '1'
 
     Write-Host ("Test run directory: {0}" -f $runDir)
     Write-Host ("Isolated QUOTA_STATE_FILE: {0}" -f $env:QUOTA_STATE_FILE)
-    Write-Host 'Isolated service base URLs: Codex / DeepSeek / MiMo -> http://127.0.0.1:1'
+    Write-Host 'Isolated service base URLs: Codex / DeepSeek / MiMo / Google -> http://127.0.0.1:1'
 
     $python = Resolve-Python
     if (-not $python) {
@@ -242,7 +246,7 @@ try {
     Invoke-CheckedStep -Name 'governance' -FilePath $bash -Arguments @('scripts/check-governance.sh')
     Invoke-CheckedStep -Name 'pyright' -FilePath $python -Arguments @('-m', 'pyright')
     Invoke-CheckedStep -Name 'node-check' -FilePath $node.Source -Arguments @('--check', 'quota_dashboard/static/app.js')
-    foreach ($credential in @('QUOTA_CODEX_ACCESS_TOKEN', 'DEEPSEEK_API_KEY', 'MIMO_API_KEY')) {
+    foreach ($credential in @('QUOTA_CODEX_ACCESS_TOKEN', 'DEEPSEEK_API_KEY', 'MIMO_API_KEY', 'QUOTA_GOOGLE_CLIENT_ID', 'QUOTA_GOOGLE_CLIENT_SECRET')) {
         [Environment]::SetEnvironmentVariable($credential, $null, 'Process')
     }
 

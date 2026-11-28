@@ -4,7 +4,10 @@ const providers = {
   codex: { name: 'Codex', mark: 'C' },
   deepseek: { name: 'DeepSeek', mark: 'D', keyLabel: 'DeepSeek API Key' },
   mimo: { name: 'MiMo', mark: 'M', keyLabel: 'MiMo SK' },
+  google: { name: 'Google AI（Google One）', mark: 'G' },
 };
+// 支持套餐、费用、币种、续费周期与下次续费日的平台。
+const metadataProviders = new Set(['codex', 'google']);
 const workspace = document.querySelector('#workspace');
 const confirmDialog = document.querySelector('#confirm');
 const announcement = document.querySelector('#announcement');
@@ -251,12 +254,60 @@ function quotaMetric(label, value, reset) {
 
 const cardTones = { codex: 'dark', mimo: 'soft' };
 
+function googleItemTime(item) {
+  if (!item || !item.updated) return '';
+  const clock = displayClock(item.updated);
+  return clock ? `<small>${item.failed ? '上次成功' : '已更新'} ${clock}</small>` : '';
+}
+
+function failureNote(message) {
+  return `${h(message || '刷新失败')} · 显示上次成功数据`;
+}
+
+function googleItemFailure(item) {
+  if (!item || !item.failed) return '';
+  return `<small class="issue">${failureNote(item.error)}</small>`;
+}
+
+function googleCardSections(account) {
+  const items = account.google_items || {};
+  const geminiApps = `<div class="metric manual">
+    <div class="metric-label">Gemini Apps</div><strong>请到 Gemini 查看</strong>
+    <small>设置 → 使用限额 · <a href="https://gemini.google.com/" target="_blank" rel="noopener noreferrer">打开 Gemini ↗</a></small>
+  </div>`;
+  const usage = items.antigravity || {};
+  const groups = Array.isArray(usage.groups) ? usage.groups : [];
+  const usageBody = groups.length
+    ? groups.map((group) => `<div class="quota-group"><b class="metric-label">${h(group.name)}</b><div class="quota-windows">${(group.windows || []).map((window) => quotaMetric(
+      `${window.label}剩余`, window.remaining, window.reset
+    )).join('')}</div></div>`).join('') + googleItemFailure(usage)
+    : `<strong class="metric-value">暂无可用额度</strong><small>${h(usage.error || '等待首次查询')}</small>`;
+  const antigravity = `<div class="metric antigravity">
+    <div class="metric-label">Antigravity</div>${usageBody}${googleItemTime(usage)}
+  </div>`;
+  const credits = items.credits || {};
+  const hasCreditsValue = credits.updated || credits.value !== undefined;
+  const creditsBody = hasCreditsValue
+    ? `<strong>${h(credits.value ?? '…')}<span class="unit">积分</span></strong>${googleItemFailure(credits)}`
+    : `<strong class="metric-value">暂无可用结果</strong><small>${h(credits.error || '等待首次查询')}</small>`;
+  const creditCard = `<div class="metric credits">
+    <div class="metric-label">Google One AI 积分</div>${creditsBody}
+    <small><a href="https://one.google.com/ai/activity" target="_blank" rel="noopener noreferrer">活动页核对 ↗</a></small>${googleItemTime(credits)}
+  </div>`;
+  return geminiApps + antigravity + creditCard;
+}
+
 function card(account) {
   const isCodex = account.provider === 'codex';
+  const isGoogle = account.provider === 'google';
   const tone = cardTones[account.provider] || '';
   let metrics;
   let detail;
-  if (isCodex) {
+  if (isGoogle) {
+    metrics = googleCardSections(account);
+    detail = `<div>套餐　${h(account.plan || '未填写')}</div><div>费用　${account.amount ? h(money(account.currency, account.amount) + ' / ' + account.cycle) : '未填写'}</div><div>续费日　${h(account.renewal || '未填写')}</div>`;
+    if (account.google_email) detail += `<div>授权身份　${h(account.google_email)}</div>`;
+  } else if (isCodex) {
     const windows = Array.isArray(account.windows) ? account.windows : [];
     if (account.updated) {
       metrics = windows.map((window) => quotaMetric(
@@ -279,7 +330,10 @@ function card(account) {
       : '<div>暂无余额明细</div>';
   }
   if (account.updated && (account.failed || account.error)) {
-    detail += `<div>${h(account.error || '刷新失败')} · 显示上次成功数据</div>`;
+    // 账号级失败提示：逐项失败也会同步到账号级字段（与各额度段内的提示
+    // 重复但一致）；授权失效（failed=false、error 非空）只在这里可见。
+    const note = account.failed ? failureNote(account.error) : h(account.error || '刷新失败');
+    detail += `<div>${note}</div>`;
   }
   return `<article class="card ${tone}" data-account-id="${h(account.id)}">
     <div class="card-head"><div class="account">${glyph(account)}<h3>${h(account.name)}</h3></div>${status(account)}</div>
@@ -295,8 +349,9 @@ function group(id, items) {
 
 function overview(items) {
   const codex = group('codex', items.filter((account) => account.provider === 'codex'));
+  const google = group('google', items.filter((account) => account.provider === 'google'));
   const balances = ['deepseek', 'mimo'].map((id) => group(id, items.filter((account) => account.provider === id))).join('');
-  return `${codex}${balances ? `<div class="balance-groups">${balances}</div>` : ''}`;
+  return `${codex}${google}${balances ? `<div class="balance-groups">${balances}</div>` : ''}`;
 }
 
 function listRows(items) {
@@ -304,7 +359,9 @@ function listRows(items) {
     <div class="table-head" aria-hidden="true"><span>账号名称</span><span class="secondary-cell">平台</span><span>连接状态</span><span class="secondary-cell">续费日／密钥</span><span>操作</span></div>
     <ul class="account-list">${items.map((account) => {
       const platform = providerName(account);
-      const info = account.provider === 'codex' ? account.renewal || '未填写' : `•••• ${account.key_tail || ''}`;
+      const usesMetadata = metadataProviders.has(account.provider);
+      const info = usesMetadata ? account.renewal || '未填写' : `•••• ${account.key_tail || ''}`;
+      const authorizeEntry = usesMetadata ? `<a class="button quiet" href="${h(href({ view: 'auth', id: account.id }))}" data-link>${account.connection === 'connected' ? '重新授权' : '去授权'}</a>` : '';
       return `<li data-account-id="${h(account.id)}">
         <div class="account-line">
           <div class="account">${glyph(account)}<b>${h(account.name)}</b></div>
@@ -312,12 +369,12 @@ function listRows(items) {
           <div>${status(account)}</div>
           <span class="secondary-cell muted">${h(info)}</span>
           <div class="actions" aria-label="${h(account.name)}的操作">
-            ${account.provider === 'codex' ? `<a class="button quiet" href="${h(href({ view: 'auth', id: account.id }))}" data-link>${account.connection === 'connected' ? '重新授权' : '去授权'}</a>` : ''}
+            ${authorizeEntry}
             <a class="button" href="${h(href({ view: 'edit', id: account.id }))}" data-link>编辑</a>
             <button class="button quiet" data-remove="${h(account.id)}">删除</button>
           </div>
         </div>
-        <details class="line-details"><summary>账号明细</summary><div class="detail-list muted"><div>平台　${h(platform)}</div><div>${account.provider === 'codex' ? '续费日' : '密钥'}　${h(info)}</div></div></details>
+        <details class="line-details"><summary>账号明细</summary><div class="detail-list muted"><div>平台　${h(platform)}</div><div>${usesMetadata ? '续费日' : '密钥'}　${h(info)}</div></div></details>
       </li>`;
     }).join('')}</ul>
   </div>`;
@@ -378,8 +435,9 @@ function readAccount() {
   return accounts.find((account) => account.id === route.id);
 }
 
-function metadataFields(account) {
-  return `<label class="control">套餐<input class="field" name="plan" value="${h(account?.plan)}" placeholder="例如 ChatGPT Pro" maxlength="60"></label>
+function metadataFields(account, provider) {
+  const planExample = provider === 'google' ? '例如 Google AI Pro' : '例如 ChatGPT Pro';
+  return `<label class="control">套餐<input class="field" name="plan" value="${h(account?.plan)}" placeholder="${planExample}" maxlength="60"></label>
     <label class="control">费用<input class="field" name="amount" type="number" min="0" step="0.01" value="${h(account?.amount)}" placeholder="0.00"></label>
     <label class="control">币种<select class="field" name="currency"><option value="USD" ${account?.currency === 'USD' ? 'selected' : ''}>USD</option><option value="CNY" ${account?.currency === 'CNY' ? 'selected' : ''}>CNY</option></select></label>
     <label class="control">续费周期<select class="field" name="cycle">${['每月', '每年', '其他'].map((cycle) => `<option ${cycle === account?.cycle ? 'selected' : ''}>${cycle}</option>`).join('')}</select></label>
@@ -395,23 +453,35 @@ function edit(draftName) {
     return missingAccount();
   }
   const provider = account?.provider || route.provider;
-  const isCodex = provider === 'codex';
+  const usesMetadata = metadataProviders.has(provider);
   const credentialName = providers[provider]?.keyLabel || '';
   const hasKey = Boolean(account?.key_tail) || account?.connection === 'connected';
   const title = account ? '编辑订阅' : '添加订阅';
+  let intro;
+  if (provider === 'google') intro = '保存账号后可进行 Google 官方授权。';
+  else if (usesMetadata) intro = '保存账号后可进入设备码授权。';
+  else if (hasKey) intro = '填写并验证新密钥后，系统会替换当前密钥。';
+  else intro = '填写密钥并验证连接后保存。';
+  let submitLabel;
+  if (usesMetadata) submitLabel = account ? '保存修改' : '保存并去授权';
+  else submitLabel = '验证并保存';
+  let connectionMethod;
+  if (provider === 'google') connectionMethod = 'Google 官方授权';
+  else if (usesMetadata) connectionMethod = '官方设备码';
+  else connectionMethod = credentialName;
   workspace.innerHTML = backLink() + heading(title, account ? `${providers[provider]?.name || provider} · ${account.name}` : '选择平台，填写您用于识别账号的名称。')
     + `<div class="form-layout">
       <form class="panel" id="account-form" autocomplete="off">
         <h2>账号配置</h2>
-        <p class="intro">${isCodex ? '保存账号后可进入设备码授权。' : hasKey ? '填写并验证新密钥后，系统会替换当前密钥。' : '填写密钥并验证连接后保存。'}</p>
+        <p class="intro">${intro}</p>
         <div class="form-fields">
           <label class="control">平台<select class="field" name="provider" aria-label="平台" ${account ? 'disabled' : ''}>${platformOptions(provider)}</select></label>
           <label class="control">账号名称<input class="field" name="name" value="${h(draftName ?? account?.name)}" placeholder="自定名称" maxlength="50" required></label>
-          ${isCodex ? metadataFields(account) : `<label class="control full">${hasKey ? '新 ' : ''}${credentialName}<input class="field" name="key" type="password" placeholder="${hasKey ? '输入新密钥以替换' : '输入用于查询余额的密钥'}" maxlength="240" ${hasKey ? '' : 'required'}><small>${hasKey ? '留空可保留当前连接。' : '验证并保存后仅显示末四位。'}</small></label>`}
+          ${usesMetadata ? metadataFields(account, provider) : `<label class="control full">${hasKey ? '新 ' : ''}${credentialName}<input class="field" name="key" type="password" placeholder="${hasKey ? '输入新密钥以替换' : '输入用于查询余额的密钥'}" maxlength="240" ${hasKey ? '' : 'required'}><small>${hasKey ? '留空可保留当前连接。' : '验证并保存后仅显示末四位。'}</small></label>`}
         </div>
         <div id="form-feedback" class="feedback" role="status" hidden></div>
         <div class="form-actions">
-          <button class="button primary" type="submit">${isCodex ? (account ? '保存修改' : '保存并去授权') : '验证并保存'}</button>
+          <button class="button primary" type="submit">${submitLabel}</button>
           <a class="button" href="${h(href({ view: 'settings', ...settingsFilters }))}" data-back>取消</a>
         </div>
       </form>
@@ -419,7 +489,7 @@ function edit(draftName) {
         <h2>${hasKey ? '当前连接' : '连接方式'}</h2>
         <dl class="specimen"><dt>平台</dt><dd>${h(providers[provider]?.name || provider)}</dd>
           ${hasKey ? `${account?.key_tail ? `<dt>已保存密钥</dt><dd>•••• ${h(account.key_tail)}</dd>` : ''}<dt>连接状态</dt><dd>${status(account)}</dd><dt>更新时间</dt><dd>${showTime(account)}</dd>`
-            : `<dt>连接方式</dt><dd>${isCodex ? '官方设备码' : credentialName}</dd><dt>连接状态</dt><dd>待连接</dd>`}
+            : `<dt>连接方式</dt><dd>${h(connectionMethod)}</dd><dt>连接状态</dt><dd>待连接</dd>`}
         </dl>
       </aside>
     </div>`;
@@ -439,15 +509,17 @@ function accountLoadError() {
 
 function authorization() {
   const account = readAccount();
-  if (!account || account.provider !== 'codex') return missingAccount();
+  if (!account || !metadataProviders.has(account.provider)) return missingAccount();
+  const isGoogle = account.provider === 'google';
   // 服务端可能有进行中的授权会话：先显示检查中，首次轮询结果到达后才渲染操作，
-  // 避免刷新后的短暂窗口内误点「开始授权」把进行中的设备码顶掉。
+  // 避免刷新后的短暂窗口内误点「开始授权」把进行中的会话顶掉。
   workspace.innerHTML = heading(
-    '连接 Codex 账号',
+    isGoogle ? '连接 Google 账号' : '连接 Codex 账号',
     `${account.name} · 按官方流程授权后即可查询额度。`,
     `<a class="button" href="${h(href({ view: 'settings', ...settingsFilters }))}" data-back>←　返回配置</a>`
   ) + '<section class="panel auth"><div class="auth-status"><p>正在检查授权状态…</p></div></section>';
-  pollAuthorization(account);
+  if (isGoogle) pollGoogleAuthorization(account);
+  else pollAuthorization(account);
 }
 
 let authTimer = null;
@@ -519,8 +591,119 @@ function renderAuthorization(account, device) {
     </div>`;
 }
 
+let googleAuthTimer = null;
+let lastGoogleAuthSignature = null;
+
+function stopGoogleAuthPolling() {
+  if (googleAuthTimer) { clearInterval(googleAuthTimer); googleAuthTimer = null; }
+  lastGoogleAuthSignature = null;
+}
+
+function pollGoogleAuthorization(account) {
+  stopGoogleAuthPolling();
+  let rendered = false;
+  const tick = async () => {
+    if (route.view !== 'auth' || route.id !== account.id) { stopGoogleAuthPolling(); return; }
+    try {
+      const payload = await apiFetch(`/api/accounts/${encodeURIComponent(account.id)}/google-auth`);
+      if (!googleAuthTimer || route.view !== 'auth' || route.id !== account.id) return;
+      const auth = payload.auth || { status: 'idle' };
+      const reachedSuccess = auth.status === 'connected'
+        || (auth.status === 'idle' && account.connection === 'connected');
+      if (auth.status === 'connected' && account.connection !== 'connected') {
+        stopGoogleAuthPolling();
+        await loadAccounts();
+        if (route.view === 'auth' && route.id === account.id) {
+          const fresh = readAccount();
+          renderGoogleAuthorization(fresh || account, auth);
+        }
+        return;
+      }
+      if (reachedSuccess) stopGoogleAuthPolling();
+      renderGoogleAuthorization(account, auth);
+      rendered = true;
+    } catch (error) {
+      // 已渲染出表单后瞬态失败保持安静：不打断用户正在输入的授权码。
+      // 首次拉取就失败（尚未渲染）时展示错误，避免停在占位符上无法重试。
+      if (!googleAuthTimer || route.view !== 'auth' || route.id !== account.id) return;
+      if (!rendered) {
+        renderGoogleAuthorization(account, { status: 'idle', error: error.message });
+        rendered = true;
+      }
+    }
+  };
+  googleAuthTimer = setInterval(tick, 1200);
+  tick();
+}
+
+function renderGoogleAuthorization(account, auth) {
+  const state = auth.status || 'idle';
+  const isConnected = state === 'connected' || (state === 'idle' && account.connection === 'connected');
+  const signature = JSON.stringify([
+    account.id, account.name, account.connection, state,
+    auth.authorization_url || '', auth.error || '',
+  ]);
+  if (signature === lastGoogleAuthSignature) return;
+  lastGoogleAuthSignature = signature;
+  let content;
+  if (isConnected) {
+    content = `<div class="feedback" role="status">连接成功 · 这个账号已可刷新额度。</div>
+      <div class="form-actions"><button class="button" data-google-auth="start">重新开始授权</button><a class="button primary" href="${h(href({ view: 'settings', ...settingsFilters }))}" data-back>返回配置管理</a></div>`;
+  } else if (state === 'waiting') {
+    content = `<div class="code-box"><div class="code-head"><span class="muted">Google 官方授权</span><span class="muted">在浏览器完成登录</span></div>
+      <div class="code-row"><a class="code-value link" href="${h(auth.authorization_url || '')}" target="_blank" rel="noopener noreferrer">打开 Google 授权页 ↗</a><button class="button" data-google-auth="copy">复制链接</button></div></div>
+      <form id="google-auth-form">
+        <label class="control">Google 授权码<input class="field" name="code" placeholder="粘贴 Google 返回的授权码" autocomplete="off" required></label>
+        <div id="google-auth-feedback" class="feedback" role="status" hidden></div>
+        <div class="form-actions"><button class="button primary" type="submit">提交授权码</button></div>
+      </form>`;
+  } else if (state === 'failed') {
+    content = `<div class="feedback error" role="status">${h(auth.error || '授权未完成。')}</div>
+      <div class="form-actions"><button class="button primary" data-google-auth="start">重新开始授权</button></div>`;
+  } else {
+    content = `${auth.error ? `<div class="feedback error" role="status">${h(auth.error)}</div>` : ''}
+      <div class="feedback" role="status">这个账号尚未连接。开始后，在 Google 官方页面完成授权。</div>
+      <div class="form-actions"><button class="button primary" data-google-auth="start">开始授权</button></div>`;
+  }
+  workspace.innerHTML = backLink() + heading('连接 Google 账号', account.name)
+    + `<div class="form-layout"><section class="panel"><h2>使用 Google 官方授权</h2><p class="intro">登录 Google 后，把返回的授权码粘贴到下方完成连接。</p>${content}</section>
+      <aside class="panel side"><h2>授权步骤</h2><ol class="steps"><li>打开 Google 官方授权页。</li><li>登录您想绑定的 Google 账号并确认授权。</li><li>复制浏览器地址栏的授权码，粘贴到左侧输入框。</li></ol></aside>
+    </div>`;
+}
+
+async function handleGoogleAuthAction(action, trigger) {
+  const account = readAccount();
+  if (!account) return;
+  if (action === 'copy') {
+    if (!navigator.clipboard) {
+      announce('请选中授权链接复制');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(workspace.querySelector('.code-value')?.href || '');
+      trigger.textContent = '已复制';
+    } catch {
+      announce('请选中授权链接复制');
+    }
+    return;
+  }
+  trigger.disabled = true;
+  try {
+    const payload = await apiFetch(
+      `/api/accounts/${encodeURIComponent(account.id)}/google-auth/${action}`, { method: 'POST' }
+    );
+    const stillOnAuth = () => route.view === 'auth' && route.id === account.id;
+    if (stillOnAuth()) renderGoogleAuthorization(account, payload.auth || { status: 'idle' });
+  } catch (error) {
+    announce(error.message);
+  } finally {
+    trigger.disabled = false;
+  }
+}
+
 function render() {
   stopAuthPolling();
+  stopGoogleAuthPolling();
   const active = route.view === 'overview' ? 'overview' : 'settings';
   document.querySelectorAll('nav a').forEach((link) => {
     if (link.dataset.page === active) link.setAttribute('aria-current', 'page');
@@ -612,6 +795,8 @@ document.addEventListener('click', (event) => {
     loadAccounts();
   } else if (target.dataset.auth) {
     handleAuthAction(target.dataset.auth, target);
+  } else if (target.dataset.googleAuth) {
+    handleGoogleAuthAction(target.dataset.googleAuth, target);
   } else if (target.dataset.remove) {
     showDelete(target.dataset.remove, target);
   } else if (target.id === 'refresh') {
@@ -680,6 +865,37 @@ workspace.addEventListener('change', (event) => {
   }
 });
 workspace.addEventListener('submit', async (event) => {
+  if (event.target.id === 'google-auth-form') {
+    event.preventDefault();
+    const form = event.target;
+    const account = readAccount();
+    const code = (new FormData(form).get('code') || '').toString().trim();
+    const feedback = form.querySelector('#google-auth-feedback');
+    const submitButton = form.querySelector('button[type=submit]');
+    if (!account || !code) return;
+    submitButton.disabled = true;
+    try {
+      const payload = await apiFetch(
+        `/api/accounts/${encodeURIComponent(account.id)}/google-auth/submit`,
+        { method: 'POST', body: JSON.stringify({ code }) }
+      );
+      // 授权与首轮流询在服务端完成后，立即拉取最新账号数据再渲染。
+      await loadAccounts();
+      if (route.view === 'auth' && route.id === account.id) {
+        const fresh = readAccount();
+        renderGoogleAuthorization(fresh || account, payload.auth || { status: 'idle' });
+      }
+    } catch (error) {
+      feedback.className = 'feedback error';
+      feedback.textContent = error.message;
+      feedback.hidden = false;
+      // 后台轮询仍在运行：不重启（重启会重置渲染签名并清掉此反馈与
+      // 用户已输入的授权码）；服务端会话状态变化由下一次轮询呈现。
+    } finally {
+      submitButton.disabled = false;
+    }
+    return;
+  }
   if (event.target.id !== 'account-form') return;
   event.preventDefault();
   const form = event.target;
@@ -699,7 +915,7 @@ workspace.addEventListener('submit', async (event) => {
   }
 
   const payload = { provider, name };
-  if (provider === 'codex') {
+  if (metadataProviders.has(provider)) {
     for (const field of ['plan', 'amount', 'currency', 'cycle', 'renewal']) {
       payload[field] = (input.get(field) || '').trim();
     }
@@ -715,7 +931,7 @@ workspace.addEventListener('submit', async (event) => {
     });
     announce('已保存订阅配置');
     await loadAccounts();
-    if (!previous && provider === 'codex' && result.account?.id) {
+    if (!previous && metadataProviders.has(provider) && result.account?.id) {
       navigate({ view: 'auth', id: result.account.id });
     } else {
       navigate({ view: 'settings', ...settingsFilters });

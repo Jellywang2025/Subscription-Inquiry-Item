@@ -2,9 +2,23 @@
 
 每个业务目标维护一份 Spec。同一个版本可以交接多个切片。本地工单引用对应版本和验收编号。
 
+## 个人订阅管理 0.3.0
+
+当前版本在个人订阅管理中加入 Google AI（Google One）。每张 Google 账号卡分别呈现 Gemini Apps 用量窗口、Antigravity 模型组额度和 Google One AI 积分余额。[统一 Spec](implement/subscription-management.md)沿用 AC-01 至 AC-09，并用 AC-10 至 AC-12 验证三项额度的来源与单位、逐项刷新与恢复、账号隔离和实号后台刷新。整版交付时，至少一项须在关页后成功自动更新，并在目标服务器用同一账号与 Google 官方结果核对。
+
+2026-11-28 已确认以下三张本地工单及其依赖。规格提交 `b2e2031`，DSH 待开工。依赖按前置票固定候选 SHA 的独立验收结果核对。
+
+| 本地工单 | 直接依赖 | 主验收编号 |
+| --- | --- | --- |
+| [01 添加一个 Google 账号并查看三项额度](../.scratch/0.3.0/issues/01-google-account-overview.md) | 无 | AC-10 |
+| [02 逐项刷新、失败恢复与书签重开](../.scratch/0.3.0/issues/02-google-refresh-bookmarks.md) | 01 | AC-11 |
+| [03 双账号隔离与目标服务器关页刷新](../.scratch/0.3.0/issues/03-google-isolation-background-refresh.md) | 02 | AC-12，补齐 AC-10 实号对照 |
+
 ## 个人订阅管理 0.2.0
 
-需求、视觉及工单粒度已确认。[统一 Spec](implement/subscription-management.md)提交 `934c183` 覆盖业务行为、八张核准基准图和 AC-01 至 AC-09。以下为 `0.2.0` 本地实施工单，初始仅 01 就绪。前置票按固定候选 SHA 独立验收通过后，DSH 可领取依赖票。
+需求、视觉及工单粒度已确认。提交 `934c183` 固定了本版的业务行为、八张核准基准图和 AC-01 至 AC-09。[0.2.0 统一 Spec](https://github.com/Jellywang2025/Subscription-Inquiry-Item/blob/934c18379055de0a75c04a194f6d723381629aee/spec/implement/subscription-management.md)
+
+以下为 `0.2.0` 本地实施工单，初始仅 01 就绪。前置票按固定候选 SHA 独立验收通过后，DSH 可领取依赖票。
 
 | 本地工单 | 直接依赖 |
 | --- | --- |

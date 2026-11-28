@@ -202,6 +202,8 @@ def test_ac08_refreshes_with_all_pages_closed_and_reopens_with_latest_result(tmp
 def test_ac08_restart_recovers_saved_result_and_resumes_background_query(tmp_path: Path, minutes: int) -> None:
     state_file = tmp_path / "state.json"
     replies = {KEY_A: ("A", reply(cny("80.00")))}
+    frozen = BalanceReply(None)
+    frozen_request = Request("GET", BALANCE_PATH, True, identity="A-before-stop")
     with serve_deepseek(accounts=replies) as source:
         with serve(source, tmp_path / "cli-first", state_file) as origin:
             with browser_session(tmp_path / "first", origin) as browser:
@@ -213,8 +215,15 @@ def test_ac08_restart_recovers_saved_result_and_resumes_background_query(tmp_pat
                         expect_interval(readback, minutes)
                 view(browser, OVERVIEW)
                 successful_card(browser, NAME_A, "80.00")
+                # 等到旧服务使用挂起回执，此前一轮后台查询已完成写回。
+                replies[KEY_A] = ("A-before-stop", frozen)
+                with source.arrived:
+                    assert source.arrived.wait_for(lambda: frozen_request in source.requests, DEADLINE), (
+                        "停服前应观察到后台查询进入挂起状态"
+                    )
                 before = by_name(browser)[NAME_A]
 
+        frozen.release.set()
         # Keep a possible startup query pending so the old result must come from disk.
         pending = BalanceReply([cny("52.00")])
         replies[KEY_A] = ("A", pending)

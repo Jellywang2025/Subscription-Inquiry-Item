@@ -90,8 +90,20 @@ h1 { font-size: clamp(31px, 3vw, 53px); font-weight: 780; line-height: 1.15; let
 .metric { flex: 1; min-width: min(100%, 105px); font-variant-numeric: tabular-nums; }
 .metric-label { font-size: 12px; color: var(--muted); }
 .metric strong { display: block; font: 680 clamp(24px, 2.5vw, 42px)/1.18 "Inter","Segoe UI",sans-serif; letter-spacing: -.075em; margin: 4px 0 5px; }
+.metric strong .unit { font: 650 0.45em/1 "Inter","Segoe UI",sans-serif; letter-spacing: -.02em; margin-left: 4px; }
 .metric.bad strong { font-size: 25px; letter-spacing: -.025em; }
 .metric small { font-size: 11px; }
+.metric small.issue { color: var(--danger); }
+.dark .metric small.issue { color: #ffbea6; }
+.metric.manual strong { font-size: clamp(18px, 1.9vw, 25px); letter-spacing: -.03em; }
+.metric.antigravity { flex: 1.6; min-width: min(100%, 210px); }
+.metric .metric-value { font-size: clamp(18px, 1.9vw, 25px); }
+.quota-group { display: grid; gap: 4px; margin: 6px 0 8px; }
+.quota-group b { font-size: 12px; font-weight: 700; color: var(--muted); }
+.quota-windows { display: flex; gap: 14px; flex-wrap: wrap; }
+.quota-windows .metric { flex: 1; min-width: min(100%, 120px); }
+.quota-windows .metric strong { font-size: clamp(20px, 2vw, 30px); }
+.code-value.link { font: 650 clamp(14px, 1.6vw, 18px)/1.4 ui-monospace, "Cascadia Mono", monospace; letter-spacing: normal; text-decoration: underline; overflow-wrap: anywhere; min-width: 0; }
 .dark .metric-label, .dark small, .dark summary, .dark .card-footer { color: #d1d8cd; }
 .progress { height: 4px; border-radius: 10px; background: #dfe5da; margin: 2px 0 7px; overflow: hidden; }
 .progress span { display: block; height: 100%; background: #637a51; }
